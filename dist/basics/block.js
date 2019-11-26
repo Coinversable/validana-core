@@ -1,4 +1,11 @@
 "use strict";
+/*!
+ * @license
+ * Copyright Coinversable B.V. All Rights Reserved.
+ *
+ * Use of this source code is governed by a AGPLv3-style license that can be
+ * found in the LICENSE file at https://validana.io/license
+ */
 Object.defineProperty(exports, "__esModule", { value: true });
 const crypto_1 = require("../tools/crypto");
 class Block {
@@ -39,7 +46,7 @@ class Block {
         }
         this.transactionsAmount = 0;
         let location = 53;
-        while (location + 4 < this.data.length - 64) {
+        while (location + 4 <= this.data.length - 64) {
             location += crypto_1.Crypto.binaryToUInt32(this.data.slice(location, location + 4)) + 4;
             this.transactionsAmount++;
         }
@@ -57,7 +64,7 @@ class Block {
     static unmerge(blocks) {
         const result = [];
         let location = 0;
-        while (location < blocks.length - 4) {
+        while (location <= blocks.length - 4) {
             const totalTransactionLength = crypto_1.Crypto.binaryToUInt32(blocks.slice(location, location + 4));
             if (location + 4 + totalTransactionLength > blocks.length) {
                 throw new Error("Length of next block exceeds total length of data.");
@@ -133,3 +140,4 @@ class Block {
 }
 exports.Block = Block;
 Block.emptyLength = 113;
+//# sourceMappingURL=block.js.map

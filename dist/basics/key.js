@@ -1,10 +1,17 @@
 "use strict";
+/*!
+ * @license
+ * Copyright Coinversable B.V. All Rights Reserved.
+ *
+ * Use of this source code is governed by a AGPLv3-style license that can be
+ * found in the LICENSE file at https://validana.io/license
+ */
 Object.defineProperty(exports, "__esModule", { value: true });
 const Encryption = require("crypto");
 const crypto_1 = require("../tools/crypto");
 class PublicKey {
-    constructor(publicKey) {
-        if (!PublicKey.isValidPublic(publicKey)) {
+    constructor(publicKey, alreadyVerified = false) {
+        if (!alreadyVerified && !PublicKey.isValidPublic(publicKey)) {
             throw new Error("Invalid public key format.");
         }
         this.publicKey = publicKey;
@@ -13,18 +20,34 @@ class PublicKey {
         if (!(publicKey instanceof Buffer) || publicKey.length !== 33 || (publicKey[0] !== 0x02 && publicKey[0] !== 0x03)) {
             return false;
         }
-        return true;
-    }
-    static isValidAddress(address) {
-        if (typeof address !== "string") {
+        try {
+            if (Encryption.ECDH.convertKey !== undefined) {
+                Encryption.ECDH.convertKey(publicKey, "secp256k1", undefined, undefined, "compressed");
+            }
+            else {
+                PublicKey.secp256k1.setPublicKey(publicKey);
+            }
+            return true;
+        }
+        catch (error) {
             return false;
         }
-        try {
-            const decodedAddress = crypto_1.Crypto.base58ToBinary(address);
-            const checksum = decodedAddress.slice(-4);
-            return decodedAddress[0] === 0x00 && crypto_1.Crypto.hash256(decodedAddress.slice(0, -4)).slice(0, 4).equals(checksum);
+    }
+    static isValidAddress(address) {
+        if (typeof address === "string") {
+            try {
+                const decodedAddress = crypto_1.Crypto.base58ToBinary(address);
+                const checksum = decodedAddress.slice(-4);
+                return decodedAddress.length === 25 && decodedAddress[0] === 0x00 && crypto_1.Crypto.hash256(decodedAddress.slice(0, -4)).slice(0, 4).equals(checksum);
+            }
+            catch (_a) {
+                return false;
+            }
         }
-        catch (_a) {
+        else if (address instanceof Buffer) {
+            return address.length === 20;
+        }
+        else {
             return false;
         }
     }
@@ -36,9 +59,36 @@ class PublicKey {
         }
         return this.address;
     }
+    getAddressAsBuffer() {
+        return crypto_1.Crypto.hash160(this.publicKey);
+    }
+    static addressAsBuffer(address) {
+        if (!PublicKey.isValidAddress(address)) {
+            throw new Error("Invalid address.");
+        }
+        if (typeof address === "string") {
+            return crypto_1.Crypto.base58ToBinary(address).slice(1, -4);
+        }
+        else {
+            return address;
+        }
+    }
+    static addressAsString(address) {
+        if (!PublicKey.isValidAddress(address)) {
+            throw new Error("Invalid address.");
+        }
+        if (typeof address === "string") {
+            return address;
+        }
+        else {
+            const hashedAddress = Buffer.concat([crypto_1.Crypto.uInt8ToBinary(0x00), address]);
+            const checksum = crypto_1.Crypto.hash256(hashedAddress).slice(0, 4);
+            return crypto_1.Crypto.binaryToBase58(Buffer.concat([hashedAddress, checksum]));
+        }
+    }
     verify(data, signature) {
-        if (signature.length !== 64) {
-            throw new Error("Invalid signature format.");
+        if (!(data instanceof Buffer) || !(signature instanceof Buffer) || signature.length !== 64) {
+            throw new Error("Invalid data or signature format.");
         }
         if (this.publicKeyPem === undefined) {
             this.publicKeyPem = "-----BEGIN PUBLIC KEY-----\n"
@@ -51,7 +101,7 @@ class PublicKey {
         }
         else {
             let i = 0;
-            while (signature[i] === 0 && signature[i + 1] <= 127 && i < 30) {
+            while (signature[i] === 0 && signature[i + 1] <= 127 && i < 31) {
                 i++;
             }
             r = signature.slice(i, 32);
@@ -62,7 +112,7 @@ class PublicKey {
         }
         else {
             let i = 32;
-            while (signature[i] === 0 && signature[i + 1] <= 127 && i < 62) {
+            while (signature[i] === 0 && signature[i + 1] <= 127 && i < 63) {
                 i++;
             }
             s = signature.slice(i);
@@ -77,6 +127,7 @@ class PublicKey {
     }
 }
 exports.PublicKey = PublicKey;
+PublicKey.secp256k1 = Encryption.createECDH("secp256k1");
 PublicKey.publicStart = crypto_1.Crypto.hexToBinary("3036301006072a8648ce3d020106052b8104000a032200");
 class PrivateKey extends PublicKey {
     constructor(privateKey, publicKey) {
@@ -84,11 +135,32 @@ class PrivateKey extends PublicKey {
             PrivateKey.secp256k1.setPrivateKey(privateKey);
             publicKey = PrivateKey.secp256k1.getPublicKey(undefined, "compressed");
         }
-        super(publicKey);
+        super(publicKey, true);
         this.privateKey = privateKey;
     }
     static generate() {
         PrivateKey.secp256k1.generateKeys();
+        let privateKey = PrivateKey.secp256k1.getPrivateKey();
+        if (privateKey.length < 32) {
+            privateKey = Buffer.concat([Buffer.alloc(32 - privateKey.length, 0), privateKey]);
+        }
+        return new PrivateKey(privateKey, PrivateKey.secp256k1.getPublicKey(undefined, "compressed"));
+    }
+    static generateNonRandom(data, salt) {
+        let hashedData = crypto_1.Crypto.hash256(Buffer.concat([data, salt]));
+        let success = false;
+        while (!success) {
+            try {
+                PrivateKey.secp256k1.setPrivateKey(hashedData);
+                success = true;
+            }
+            catch (error) {
+                if (error.message !== "Private key is not valid for specified curve.") {
+                    throw error;
+                }
+                hashedData = crypto_1.Crypto.hash256(Buffer.concat([hashedData, salt]));
+            }
+        }
         let privateKey = PrivateKey.secp256k1.getPrivateKey();
         if (privateKey.length < 32) {
             privateKey = Buffer.concat([Buffer.alloc(32 - privateKey.length, 0), privateKey]);
@@ -107,7 +179,13 @@ class PrivateKey extends PublicKey {
         if (!crypto_1.Crypto.hash256(decodedWif.slice(0, -4)).slice(0, 4).equals(checksum)) {
             return false;
         }
-        return true;
+        try {
+            PrivateKey.secp256k1.setPrivateKey(decodedWif.slice(1, 33));
+            return true;
+        }
+        catch (error) {
+            return false;
+        }
     }
     toWIF() {
         const mainNetKey = Buffer.concat([crypto_1.Crypto.uInt8ToBinary(0x80), this.privateKey, crypto_1.Crypto.uInt8ToBinary(0x01)]);
@@ -121,6 +199,9 @@ class PrivateKey extends PublicKey {
         return new PrivateKey(crypto_1.Crypto.base58ToBinary(wif).slice(1, 33));
     }
     sign(data) {
+        if (!(data instanceof Buffer)) {
+            throw new Error("Invalid data format");
+        }
         if (this.privateKeyPem === undefined) {
             this.privateKeyPem = "-----BEGIN EC PRIVATE KEY-----\n"
                 + Buffer.concat([PrivateKey.privateStart, this.privateKey, PrivateKey.privateEnd]).toString("base64")
@@ -145,6 +226,6 @@ class PrivateKey extends PublicKey {
     }
 }
 exports.PrivateKey = PrivateKey;
-PrivateKey.secp256k1 = Encryption.createECDH("secp256k1");
 PrivateKey.privateStart = crypto_1.Crypto.hexToBinary("302e0201010420");
 PrivateKey.privateEnd = crypto_1.Crypto.hexToBinary("a00706052b8104000a");
+//# sourceMappingURL=key.js.map

@@ -1,4 +1,4 @@
-/**
+/*!
  * @license
  * Copyright Coinversable B.V. All Rights Reserved.
  *
@@ -11,6 +11,9 @@ import { Crypto } from "../tools/crypto";
 
 /** A public key. We use and accept compressed keys only. */
 export class PublicKey {
+	//The curve we use
+	protected static readonly secp256k1 = Encryption.createECDH("secp256k1");
+
 	//Der format for secp256k1 public key.
 	private static readonly publicStart = Crypto.hexToBinary("3036301006072a8648ce3d020106052b8104000a032200");
 
@@ -19,9 +22,12 @@ export class PublicKey {
 	private publicKeyPem: string | undefined;
 	private address: string | undefined;
 
-	/** Create a new public key from a buffer. Will throw an error if the buffer is not a valid public key. */
-	constructor(publicKey: Buffer) {
-		if (!PublicKey.isValidPublic(publicKey)) {
+	/**
+	 * Create a new public key from a buffer.
+	 * @throws If the buffer is not a valid public key. (Unless alreadyVerified is set.)
+	 */
+	constructor(publicKey: Buffer, alreadyVerified: boolean = false) {
+		if (!alreadyVerified && !PublicKey.isValidPublic(publicKey)) {
 			throw new Error("Invalid public key format.");
 		}
 		this.publicKey = publicKey;
@@ -32,19 +38,33 @@ export class PublicKey {
 		if (!(publicKey instanceof Buffer) || publicKey.length !== 33 || (publicKey[0] !== 0x02 && publicKey[0] !== 0x03)) {
 			return false;
 		}
-		return true;
+		try {
+			if (Encryption.ECDH.convertKey !== undefined) {
+				//Available from node.js version 10 and onwards.
+				Encryption.ECDH.convertKey(publicKey, "secp256k1", undefined, undefined, "compressed");
+			} else {
+				//deprecated since node.js version 5.2.
+				(PublicKey.secp256k1 as any).setPublicKey(publicKey);
+			}
+			return true;
+		} catch (error) {
+			return false;
+		}
 	}
 
 	/** Check if an address is valid or not. Only prefix 0 is accepted. */
-	public static isValidAddress(address: string): boolean {
-		if (typeof address !== "string") {
-			return false;
-		}
-		try {
-			const decodedAddress = Crypto.base58ToBinary(address);
-			const checksum = decodedAddress.slice(-4);
-			return decodedAddress[0] === 0x00 && Crypto.hash256(decodedAddress.slice(0, -4)).slice(0, 4).equals(checksum);
-		} catch {
+	public static isValidAddress(address: string | Buffer): boolean {
+		if (typeof address === "string") {
+			try {
+				const decodedAddress = Crypto.base58ToBinary(address);
+				const checksum = decodedAddress.slice(-4);
+				return decodedAddress.length === 25 && decodedAddress[0] === 0x00 && Crypto.hash256(decodedAddress.slice(0, -4)).slice(0, 4).equals(checksum);
+			} catch {
+				return false;
+			}
+		} else if (address instanceof Buffer) {
+			return address.length === 20;
+		} else {
 			return false;
 		}
 	}
@@ -59,10 +79,53 @@ export class PublicKey {
 		return this.address;
 	}
 
-	/** Verify a message and its signature against a public key. Signature should exist of 32 bytes r followed by 32 bytes s. */
+	/**
+	 * Get the address of this public key as binary data.
+	 * Unlike string addresses there is no checksum, nor prefix, as users are not expected to use addresses in binary format.
+	 */
+	public getAddressAsBuffer(): Buffer {
+		return Crypto.hash160(this.publicKey);
+	}
+
+	/**
+	 * Convert an address to binary format.
+	 * @throws If the address is invalid.
+	 */
+	public static addressAsBuffer(address: string | Buffer): Buffer {
+		if (!PublicKey.isValidAddress(address)) {
+			throw new Error("Invalid address.");
+		}
+		if (typeof address === "string") {
+			return Crypto.base58ToBinary(address).slice(1, -4);
+		} else {
+			return address;
+		}
+	}
+
+	/**
+	 * Convert an address to string format.
+	 * @throws If the address in invalid.
+	 */
+	public static addressAsString(address: string | Buffer): string {
+		if (!PublicKey.isValidAddress(address)) {
+			throw new Error("Invalid address.");
+		}
+		if (typeof address === "string") {
+			return address;
+		} else {
+			const hashedAddress = Buffer.concat([Crypto.uInt8ToBinary(0x00), address]);
+			const checksum = Crypto.hash256(hashedAddress).slice(0, 4);
+			return Crypto.binaryToBase58(Buffer.concat([hashedAddress, checksum]));
+		}
+	}
+
+	/**
+	 * Verify a message and its signature against a public key. Signature should exist of 32 bytes r followed by 32 bytes s.
+	 * @throws if the data or signature have an invalid format
+	 */
 	public verify(data: Buffer, signature: Buffer): boolean {
-		if (signature.length !== 64) {
-			throw new Error("Invalid signature format.");
+		if (!(data instanceof Buffer) || !(signature instanceof Buffer) || signature.length !== 64) {
+			throw new Error("Invalid data or signature format.");
 		}
 		if (this.publicKeyPem === undefined) {
 			this.publicKeyPem = "-----BEGIN PUBLIC KEY-----\n"
@@ -76,7 +139,7 @@ export class PublicKey {
 		} else {
 			//Remove starting 0s, unless that would make it negative
 			let i = 0;
-			while (signature[i] === 0 && signature[i + 1] <= 127 && i < 30) {
+			while (signature[i] === 0 && signature[i + 1] <= 127 && i < 31) {
 				i++;
 			}
 			r = signature.slice(i, 32);
@@ -88,12 +151,12 @@ export class PublicKey {
 		} else {
 			//Remove starting 0s, unless that would make it negative
 			let i = 32;
-			while (signature[i] === 0 && signature[i + 1] <= 127 && i < 62) {
+			while (signature[i] === 0 && signature[i + 1] <= 127 && i < 63) {
 				i++;
 			}
 			s = signature.slice(i);
 		}
-		//Der format for public key
+		//Der format for signature
 		const derSignature = Buffer.concat([
 			Buffer.from([0x30, r.length + s.length + 4, 0x02, r.length]),
 			r,
@@ -107,13 +170,9 @@ export class PublicKey {
 
 /**
  * A private key.
- * Technical info: Only the secp256k1 curve is supported, We use compressed
- * wif prefix 0x80 (same as bitcoin) by default, but accept all others.
+ * Technical info: Only the secp256k1 curve is supported, We use compressed wif prefix 0x80 (same as bitcoin).
  */
 export class PrivateKey extends PublicKey {
-	//The curve we use
-	private static readonly secp256k1 = Encryption.createECDH("secp256k1");
-
 	//Der format for secp256k1 private key.
 	private static readonly privateStart = Crypto.hexToBinary("302e0201010420");
 	private static readonly privateEnd = Crypto.hexToBinary("a00706052b8104000a");
@@ -129,13 +188,41 @@ export class PrivateKey extends PublicKey {
 			//Typecast as types are incorrect
 			publicKey = PrivateKey.secp256k1.getPublicKey(undefined as any, "compressed") as any as Buffer;
 		}
-		super(publicKey);
+		super(publicKey, true);
 		this.privateKey = privateKey;
 	}
 
-	/** Generate a new random private key. An error will be thrown if no suitable random source is available. */
+	/**
+	 * Generate a new random private key.
+	 * @throws If no suitable random source is available.
+	 */
 	public static generate(): PrivateKey {
 		PrivateKey.secp256k1.generateKeys();
+		let privateKey = PrivateKey.secp256k1.getPrivateKey();
+		//Add leading zeros (openssl removes them, but for wif format they are required)
+		if (privateKey.length < 32) {
+			privateKey = Buffer.concat([Buffer.alloc(32 - privateKey.length, 0), privateKey]);
+		}
+		return new PrivateKey(privateKey, PrivateKey.secp256k1.getPublicKey(undefined as any, "compressed") as any);
+	}
+
+	/** Generate a new non-random private key based on data. */
+	public static generateNonRandom(data: Buffer, salt: Buffer): PrivateKey {
+		let hashedData = Crypto.hash256(Buffer.concat([data, salt]));
+		let success = false;
+		while (!success) {
+			try {
+				PrivateKey.secp256k1.setPrivateKey(hashedData);
+				success = true;
+			} catch (error) {
+				//This error should appear about 1 in 2^128 times.
+				if (error.message !== "Private key is not valid for specified curve.") {
+					throw error;
+				}
+				//Salt it again for safety against timing attacks.
+				hashedData = Crypto.hash256(Buffer.concat([hashedData, salt]));
+			}
+		}
 		let privateKey = PrivateKey.secp256k1.getPrivateKey();
 		//Add leading zeros (openssl removes them, but for wif format they are required)
 		if (privateKey.length < 32) {
@@ -160,21 +247,25 @@ export class PrivateKey extends PublicKey {
 			//Checksum is invalid
 			return false;
 		}
-		return true;
+		try {
+			PrivateKey.secp256k1.setPrivateKey(decodedWif.slice(1, 33));
+			return true;
+		} catch (error) {
+			return false;
+		}
 	}
 
-	/**
-	 * Get the wif of this private key.
-	 * By default it will use the same format it was imported in.
-	 * If it was generated by generate() this will be compressed with network prefix 0x80
-	 */
+	/** Get the wif of this private key. */
 	public toWIF(): string {
 		const mainNetKey = Buffer.concat([Crypto.uInt8ToBinary(0x80), this.privateKey, Crypto.uInt8ToBinary(0x01)]);
 		const checkSum = Crypto.hash256(mainNetKey).slice(0, 4);
 		return Crypto.binaryToBase58(Buffer.concat([mainNetKey, checkSum]));
 	}
 
-	/** Turn a WIF into a private key. Throws an error if wif is not a valid private key. */
+	/**
+	 * Turn a WIF into a private key.
+	 * @throws If wif is not a valid private key.
+	 */
 	public static fromWIF(wif: string): PrivateKey {
 		if (!PrivateKey.isValidWIF(wif)) {
 			throw new Error("Invalid wif");
@@ -185,6 +276,9 @@ export class PrivateKey extends PublicKey {
 
 	/** Sign data with this private key. Returns the signature as 32 bytes r followed by 32 bytes s. */
 	public sign(data: Buffer): Buffer {
+		if (!(data instanceof Buffer)) {
+			throw new Error("Invalid data format");
+		}
 		//We use open ssl for signing, which requires PEM formatted key.
 		if (this.privateKeyPem === undefined) {
 			this.privateKeyPem = "-----BEGIN EC PRIVATE KEY-----\n"

@@ -1,4 +1,4 @@
-/**
+/*!
  * @license
  * Copyright Coinversable B.V. All Rights Reserved.
  *
@@ -32,7 +32,7 @@ export class Transaction {
 	public static readonly maxPayloadLength = 100000;
 	/** The length of a transaction with an empty payload. */
 	public static readonly emptyLength = 154;
-	/** Data consists of 4 bytes totalLength, 1 version, 16 transactionId, 32 contractHash, 8 validtill, ? payload, 64 signature, 33 publickey */
+	/** Data consists of 4 bytes totalLength, 1 version, 16 transactionId, 32 contractHash, 8 validtill, ? payload, (64 signature, 33 publickey) */
 	public readonly data: Buffer;
 	/** The version of the transaction. */
 	public readonly version: number;
@@ -48,12 +48,12 @@ export class Transaction {
 
 	//We cache the payload as it may be needed more often.
 	private verifiedPayload: boolean = false;
-	private payload: { [key: string]: any } | undefined;
+	private payload: { [key: string]: unknown } | undefined;
 
 	/**
 	 * Create a new transaction from a database transaction or a transaction transfered between nodes or inside a block.
-	 * Will throw an error if the transaction could not be constructed, but will not check the correctness of the payload or signature.
 	 * @param transaction The transaction
+	 * @throws if the transaction could not be constructed, but will not check the correctness of the payload or signature.
 	 */
 	constructor(transaction: Buffer | DBTransaction) {
 		if (transaction instanceof Buffer) {
@@ -111,13 +111,13 @@ export class Transaction {
 
 	/**
 	 * Unmerge a list of transactions that were stored in a block or stored as binary data.
-	 * Will throw an error if the data is not a valid list of transactions.
 	 * @param transactions A list of transactions.
+	 * @throws if the data is not a valid list of transactions.
 	 */
 	public static unmerge(transactions: Buffer): Transaction[] {
 		const result: Transaction[] = [];
 		let location = 0;
-		while (location < transactions.length - 4) {
+		while (location <= transactions.length - 4) {
 			const totalTransactionLength = Crypto.binaryToUInt32(transactions.slice(location, location + 4));
 			if (location + 4 + totalTransactionLength > transactions.length) {
 				throw new Error("Length of next transaction exceeds total length of data.");
@@ -135,27 +135,25 @@ export class Transaction {
 	}
 
 	/**
-	 * Create a signed transaction from an unsigned transaction. Will throw an error if any params are invalid.
+	 * Create a signed transaction from an unsigned transaction.
 	 * @param tx The unsigned transaction
 	 * @param signPrefix The prefix to use for signing
 	 * @param privKey The private key to use for signing
+	 * @throws if a transaction could not be constructed, but will not verify the correctness of all values.
 	 */
-	public static sign(tx: UnsignedTx, signPrefix: Buffer, privKey: PrivateKey): Transaction {
-		if (tx.version !== 1) {
-			throw new Error("Unsupported version.");
-		}
-		const data = Buffer.concat([
+	public static sign(tx: Buffer | UnsignedTx, signPrefix: Buffer, privKey: PrivateKey): Transaction {
+		const toSign = tx instanceof Buffer ? tx.slice(4) : Buffer.concat([
 			Crypto.uInt8ToBinary(tx.version),
 			tx.transaction_id,
 			tx.contract_hash,
 			Crypto.uLongToBinary(tx.valid_till),
 			Crypto.utf8ToBinary(tx.payload)
 		]);
-		const signature = privKey.sign(Buffer.concat([signPrefix, data]));
+		const signature = privKey.sign(Buffer.concat([signPrefix, toSign]));
 		const pubKey = privKey.publicKey;
 		return new Transaction(Buffer.concat([
-			Crypto.uInt32ToBinary(data.length + signature.length + pubKey.length),
-			data,
+			Crypto.uInt32ToBinary(toSign.length + signature.length + pubKey.length),
+			toSign,
 			signature,
 			pubKey
 		]));
@@ -170,8 +168,8 @@ export class Transaction {
 			//Use a less random source, which is good enough as security doesn't depend on it.
 			//We use use a better random to ensure there are no collisions.
 			let result: string = "";
-			for (let i = 0; i < 4; i++) {
-				result += (Math.random() * 16).toString(16).slice(2, 10);
+			for (let i = 0; i < 32; i++) {
+				result += (Math.random() * 16 | 0).toString(16);
 			}
 			return Crypto.hexToBinary(result);
 		}
@@ -202,7 +200,7 @@ export class Transaction {
 
 	/** Get the address from the public key of this transaction. */
 	public getAddress(): string {
-		return new PublicKey(this.getPublicKeyBuffer()).getAddress();
+		return new PublicKey(this.getPublicKeyBuffer(), true).getAddress();
 	}
 
 	/** Get the payload of this transaction or undefined if it is not a valid json object. */
@@ -212,7 +210,7 @@ export class Transaction {
 			this.verifiedPayload = true;
 			try {
 				const result = JSON.parse(Crypto.binaryToUtf8(this.getPayloadBinary()));
-				if (typeof result === "object") {
+				if (typeof result === "object" && result !== null && !(result instanceof Array)) {
 					this.payload = result;
 				}
 			} catch { }
@@ -224,14 +222,14 @@ export class Transaction {
 	/** Get whether or not the signature for this transaction is valid. */
 	public verifySignature(signPrefix: Buffer): boolean {
 		try {
-			return new PublicKey(this.getPublicKeyBuffer()).verify(Buffer.concat([signPrefix, this.data.slice(4, - 97)]), this.getSignature());
+			return new PublicKey(this.getPublicKeyBuffer(), true).verify(Buffer.concat([signPrefix, this.data.slice(4, - 97)]), this.getSignature());
 		} catch (error) {
 			return false;
 		}
 	}
 
 	/** Validate if this payload is valid for a given template. Will return an error string or undefined. */
-	public verifyTemplate(template: Template | undefined): string | undefined {
+	public verifyTemplate(template: Template, version: 1 | 2): string | undefined {
 		//If we did not validate the json yet do this now.
 		if (!this.verifiedPayload) {
 			this.getPayloadJson();
@@ -240,35 +238,41 @@ export class Transaction {
 			return "Payload is invalid json.";
 		}
 
-		if (template === undefined) {
-			return "Contract does not exist.";
-		}
-
 		//Check if there aren't too many parameters.
 		const templateKeys = Object.keys(template);
-		if (Object.keys(this.payload).length > templateKeys.length) {
-			return "Payload has too many parameters";
+		if (Object.keys(this.payload).some((payloadKey) => template[payloadKey] === undefined)) {
+			return "Payload has extra key.";
 		}
 
 		//Check if each key is valid
 		for (const key of templateKeys) {
 			const payloadKey = this.payload[key];
-			if (template[key].type.endsWith("Array")) {
+			const templateKeyType = template[key].type;
+			if (templateKeyType.endsWith("Array")) {
 				//If it is an array type check if it is indeed an array and all values inside are valid.
 				if (!(payloadKey instanceof Array)) {
 					return "Payload has invalid or missing array type";
 
 				}
-				const subType = template[key].type.slice(0, template[key].type.lastIndexOf("Array"));
+				const subType = templateKeyType.slice(0, -5);
 				for (const payloadSubKey of payloadKey) {
-					const checkTypeResult = this.checkType(payloadSubKey, subType);
+					const checkTypeResult = this.checkType(payloadSubKey, subType, version);
 					if (checkTypeResult !== undefined) {
 						return checkTypeResult + " in array";
 					}
 				}
+			} else if (templateKeyType.endsWith("?") && version !== 1) {
+				const subType = templateKeyType.slice(0, -1);
+				//If it is an optional single type
+				if (payloadKey !== undefined) {
+					const checkTypeResult = this.checkType(payloadKey, subType, version);
+					if (checkTypeResult !== undefined) {
+						return checkTypeResult;
+					}
+				}
 			} else {
-				//If it is not an array check if the values are of the normal type.
-				const checkTypeResult = this.checkType(payloadKey, template[key].type);
+				//If it is a single type
+				const checkTypeResult = this.checkType(payloadKey, templateKeyType, version);
 				if (checkTypeResult !== undefined) {
 					return checkTypeResult;
 				}
@@ -282,7 +286,7 @@ export class Transaction {
 	 * @param value The value to check.
 	 * @param type The type to check against.
 	 */
-	private checkType(value: any, type: string): string | undefined {
+	private checkType(value: any, type: string, version: 1 | 2): string | undefined {
 		//Check what type of payload the contract requires for a certain key.
 		switch (type) {
 			case "bool":
@@ -313,8 +317,13 @@ export class Transaction {
 				if (typeof value !== "string" || !Crypto.isBase64(value)) { return "Payload has invalid or missing base64 type"; }
 				break;
 			case "json":
-				if (typeof value !== "string") { return "Payload has invalid or missing json type"; }
-				try { JSON.parse(value); } catch { return "Payload has invalid or missing json type"; }
+				if (version === 1) {
+					if (typeof value !== "string") { return "Payload has invalid or missing json type"; }
+					try { JSON.parse(value); } catch (error) { return "Payload has invalid or missing json type"; }
+				}
+				break;
+			case "id":
+				if (typeof value !== "string" || (version !== 1 && (value.length !== 32 || !Crypto.isHex(value)))) { return "Payload has invalid or missing id type"; }
 				break;
 			case "str":
 			default:

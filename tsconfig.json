@@ -7,6 +7,9 @@
 			"node_modules/@types"
 		],
 		"target": "es2017",
+		"lib": [
+			"es2017"
+		],
 		"module": "commonjs",
 		"noImplicitAny": true,
 		"noImplicitThis": true,
@@ -18,11 +21,13 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"noFallthroughCasesInSwitch": true,
-		"declaration": true,
+		"forceConsistentCasingInFileNames": true,
+		"sourceMap": true,
 		"outDir": "./dist"
 	},
 	"exclude": [
 		"node_modules",
-		"dist"
+		"dist",
+		"src/__tests__"
 	]
 }

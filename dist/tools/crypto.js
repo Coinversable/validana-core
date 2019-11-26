@@ -1,4 +1,11 @@
 "use strict";
+/*!
+ * @license
+ * Copyright Coinversable B.V. All Rights Reserved.
+ *
+ * Use of this source code is governed by a AGPLv3-style license that can be
+ * found in the LICENSE file at https://validana.io/license
+ */
 Object.defineProperty(exports, "__esModule", { value: true });
 const Encryption = require("crypto");
 class Crypto {
@@ -24,7 +31,7 @@ class Crypto {
         return Encryption.createHash("md5").update(buffer).digest();
     }
     static isHex(text) {
-        return text.search(/^[0-9A-Fa-f]*$/) === 0 && (text.length & 0x1) === 0;
+        return text.search(/^[0-9A-Fa-f]*$/) === 0 && text.length % 2 === 0;
     }
     static hexToBinary(hex) {
         return Buffer.from(hex, "hex");
@@ -45,9 +52,9 @@ class Crypto {
             if (value === undefined) {
                 throw new Error("Invalid character.");
             }
-            for (let j = 0; j < bytes.length; j++) {
-                value += bytes[j] * 58;
-                bytes[j] = value & 0xff;
+            for (let i = 0; i < bytes.length; i++) {
+                value += bytes[i] * 58;
+                bytes[i] = value & 0xff;
                 value >>= 8;
             }
             while (value > 0) {
@@ -55,7 +62,7 @@ class Crypto {
                 value >>= 8;
             }
         }
-        for (let k = 0; base58[k] === Crypto.base58chars[0] && k < base58.length - 1; k++) {
+        for (let i = 0; base58[i] === Crypto.base58chars[0] && i < base58.length - 1; i++) {
             bytes.push(0);
         }
         return Buffer.from(bytes.reverse());
@@ -86,7 +93,7 @@ class Crypto {
         return result;
     }
     static isBase64(text) {
-        return text.search(/^[\+\/-9A-Za-z]*={0,2}$/) === 0 && (text.length & 0x3) === 0;
+        return text.search(/^[\+\/-9A-Za-z]*={0,2}$/) === 0 && text.length % 4 === 0;
     }
     static base64ToBinary(base64) {
         return Buffer.from(base64, "base64");
@@ -97,8 +104,24 @@ class Crypto {
     static isUtf8Postgres(text) {
         return text.indexOf("\0") === -1;
     }
+    static isBase64Url(text) {
+        return text.search(/^[\-_0-9A-Za-z]*$/) === 0 && text.length % 4 !== 1;
+    }
+    static base64UrlToBinary(base64url) {
+        const pad = base64url.length % 4;
+        if (pad === 3) {
+            base64url = base64url + "=";
+        }
+        else if (pad === 2) {
+            base64url = base64url + "==";
+        }
+        return Buffer.from(base64url.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    }
+    static binaryToBase64Url(binary) {
+        return binary.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    }
     static makeUtf8Postgres(text) {
-        return text.replace("\0", "");
+        return text.replace(/\0/g, "");
     }
     static utf8ToBinary(text) {
         return Buffer.from(text, "utf8");
@@ -149,4 +172,5 @@ class Crypto {
 }
 exports.Crypto = Crypto;
 Crypto.base58chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-Crypto.base58map = Object.keys(Crypto.base58chars).reduce((obj, key) => (obj[Crypto.base58chars[Number.parseInt(key)]] = Number.parseInt(key), obj), {});
+Crypto.base58map = Object.keys(Crypto.base58chars).reduce((obj, key) => (obj[Crypto.base58chars[Number.parseInt(key, 10)]] = Number.parseInt(key, 10), obj), {});
+//# sourceMappingURL=crypto.js.map

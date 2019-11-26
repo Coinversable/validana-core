@@ -1,4 +1,11 @@
 "use strict";
+/*!
+ * @license
+ * Copyright Coinversable B.V. All Rights Reserved.
+ *
+ * Use of this source code is governed by a AGPLv3-style license that can be
+ * found in the LICENSE file at https://validana.io/license
+ */
 Object.defineProperty(exports, "__esModule", { value: true });
 const crypto_1 = require("../tools/crypto");
 const crypto_2 = require("crypto");
@@ -54,7 +61,7 @@ class Transaction {
     static unmerge(transactions) {
         const result = [];
         let location = 0;
-        while (location < transactions.length - 4) {
+        while (location <= transactions.length - 4) {
             const totalTransactionLength = crypto_1.Crypto.binaryToUInt32(transactions.slice(location, location + 4));
             if (location + 4 + totalTransactionLength > transactions.length) {
                 throw new Error("Length of next transaction exceeds total length of data.");
@@ -68,21 +75,18 @@ class Transaction {
         return result;
     }
     static sign(tx, signPrefix, privKey) {
-        if (tx.version !== 1) {
-            throw new Error("Unsupported version.");
-        }
-        const data = Buffer.concat([
+        const toSign = tx instanceof Buffer ? tx.slice(4) : Buffer.concat([
             crypto_1.Crypto.uInt8ToBinary(tx.version),
             tx.transaction_id,
             tx.contract_hash,
             crypto_1.Crypto.uLongToBinary(tx.valid_till),
             crypto_1.Crypto.utf8ToBinary(tx.payload)
         ]);
-        const signature = privKey.sign(Buffer.concat([signPrefix, data]));
+        const signature = privKey.sign(Buffer.concat([signPrefix, toSign]));
         const pubKey = privKey.publicKey;
         return new Transaction(Buffer.concat([
-            crypto_1.Crypto.uInt32ToBinary(data.length + signature.length + pubKey.length),
-            data,
+            crypto_1.Crypto.uInt32ToBinary(toSign.length + signature.length + pubKey.length),
+            toSign,
             signature,
             pubKey
         ]));
@@ -93,8 +97,8 @@ class Transaction {
         }
         catch (_a) {
             let result = "";
-            for (let i = 0; i < 4; i++) {
-                result += (Math.random() * 16).toString(16).slice(2, 10);
+            for (let i = 0; i < 32; i++) {
+                result += (Math.random() * 16 | 0).toString(16);
             }
             return crypto_1.Crypto.hexToBinary(result);
         }
@@ -115,14 +119,14 @@ class Transaction {
         return this.data.slice(-33);
     }
     getAddress() {
-        return new key_1.PublicKey(this.getPublicKeyBuffer()).getAddress();
+        return new key_1.PublicKey(this.getPublicKeyBuffer(), true).getAddress();
     }
     getPayloadJson() {
         if (!this.verifiedPayload) {
             this.verifiedPayload = true;
             try {
                 const result = JSON.parse(crypto_1.Crypto.binaryToUtf8(this.getPayloadBinary()));
-                if (typeof result === "object") {
+                if (typeof result === "object" && result !== null && !(result instanceof Array)) {
                     this.payload = result;
                 }
             }
@@ -132,42 +136,49 @@ class Transaction {
     }
     verifySignature(signPrefix) {
         try {
-            return new key_1.PublicKey(this.getPublicKeyBuffer()).verify(Buffer.concat([signPrefix, this.data.slice(4, -97)]), this.getSignature());
+            return new key_1.PublicKey(this.getPublicKeyBuffer(), true).verify(Buffer.concat([signPrefix, this.data.slice(4, -97)]), this.getSignature());
         }
         catch (error) {
             return false;
         }
     }
-    verifyTemplate(template) {
+    verifyTemplate(template, version) {
         if (!this.verifiedPayload) {
             this.getPayloadJson();
         }
         if (this.payload === undefined) {
             return "Payload is invalid json.";
         }
-        if (template === undefined) {
-            return "Contract does not exist.";
-        }
         const templateKeys = Object.keys(template);
-        if (Object.keys(this.payload).length > templateKeys.length) {
-            return "Payload has too many parameters";
+        if (Object.keys(this.payload).some((payloadKey) => template[payloadKey] === undefined)) {
+            return "Payload has extra key.";
         }
         for (const key of templateKeys) {
             const payloadKey = this.payload[key];
-            if (template[key].type.endsWith("Array")) {
+            const templateKeyType = template[key].type;
+            if (templateKeyType.endsWith("Array")) {
                 if (!(payloadKey instanceof Array)) {
                     return "Payload has invalid or missing array type";
                 }
-                const subType = template[key].type.slice(0, template[key].type.lastIndexOf("Array"));
+                const subType = templateKeyType.slice(0, -5);
                 for (const payloadSubKey of payloadKey) {
-                    const checkTypeResult = this.checkType(payloadSubKey, subType);
+                    const checkTypeResult = this.checkType(payloadSubKey, subType, version);
                     if (checkTypeResult !== undefined) {
                         return checkTypeResult + " in array";
                     }
                 }
             }
+            else if (templateKeyType.endsWith("?") && version !== 1) {
+                const subType = templateKeyType.slice(0, -1);
+                if (payloadKey !== undefined) {
+                    const checkTypeResult = this.checkType(payloadKey, subType, version);
+                    if (checkTypeResult !== undefined) {
+                        return checkTypeResult;
+                    }
+                }
+            }
             else {
-                const checkTypeResult = this.checkType(payloadKey, template[key].type);
+                const checkTypeResult = this.checkType(payloadKey, templateKeyType, version);
                 if (checkTypeResult !== undefined) {
                     return checkTypeResult;
                 }
@@ -175,7 +186,7 @@ class Transaction {
         }
         return undefined;
     }
-    checkType(value, type) {
+    checkType(value, type, version) {
         switch (type) {
             case "bool":
                 if (typeof value !== "boolean") {
@@ -218,14 +229,21 @@ class Transaction {
                 }
                 break;
             case "json":
-                if (typeof value !== "string") {
-                    return "Payload has invalid or missing json type";
+                if (version === 1) {
+                    if (typeof value !== "string") {
+                        return "Payload has invalid or missing json type";
+                    }
+                    try {
+                        JSON.parse(value);
+                    }
+                    catch (error) {
+                        return "Payload has invalid or missing json type";
+                    }
                 }
-                try {
-                    JSON.parse(value);
-                }
-                catch (_a) {
-                    return "Payload has invalid or missing json type";
+                break;
+            case "id":
+                if (typeof value !== "string" || (version !== 1 && (value.length !== 32 || !crypto_1.Crypto.isHex(value)))) {
+                    return "Payload has invalid or missing id type";
                 }
                 break;
             case "str":
@@ -240,3 +258,4 @@ class Transaction {
 exports.Transaction = Transaction;
 Transaction.maxPayloadLength = 100000;
 Transaction.emptyLength = 154;
+//# sourceMappingURL=transaction.js.map

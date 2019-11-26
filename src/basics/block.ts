@@ -1,4 +1,4 @@
-/**
+/*!
  * @license
  * Copyright Coinversable B.V. All Rights Reserved.
  *
@@ -43,9 +43,9 @@ export class Block {
 
 	/**
 	 * Create a new block based on data send from other nodes, or based on a block found in the database.
-	 * Will throw an error if the block could not be constructed, but will not check the correctness of
-	 * 	the previousBlockHash, the signature or the transactions inside the block.
 	 * @param block The block
+	 * @throws If the block could not be constructed, but will not check the correctness of
+	 * 	the previousBlockHash, the signature or the transactions inside the block.
 	 */
 	constructor(block: Buffer | DBBlock) {
 		if (block instanceof Buffer) {
@@ -89,7 +89,7 @@ export class Block {
 
 		this.transactionsAmount = 0;
 		let location = 53;
-		while (location + 4 < this.data.length - 64) {
+		while (location + 4 <= this.data.length - 64) {
 			location += Crypto.binaryToUInt32(this.data.slice(location, location + 4)) + 4;
 			this.transactionsAmount++;
 		}
@@ -112,13 +112,13 @@ export class Block {
 
 	/**
 	 * Unmerge a list of blocks that were transfered or stored as binary data.
-	 * Will throw an error if the data is not a valid list of blocks.
 	 * @param blocks A list of blocks.
+	 * @throws if the data is not a valid list of blocks.
 	 */
 	public static unmerge(blocks: Buffer): Block[] {
 		const result: Block[] = [];
 		let location = 0;
-		while (location < blocks.length - 4) {
+		while (location <= blocks.length - 4) {
 			const totalTransactionLength = Crypto.binaryToUInt32(blocks.slice(location, location + 4));
 			if (location + 4 + totalTransactionLength > blocks.length) {
 				throw new Error("Length of next block exceeds total length of data.");
@@ -136,10 +136,11 @@ export class Block {
 	}
 
 	/**
-	 * Create a signed block from an unsigned block. Will throw an error if any params are invalid.
+	 * Create a signed block from an unsigned block.
 	 * @param block The unsigned block
 	 * @param signPrefix The prefix to use for signing
 	 * @param privKey The private key to use for signing
+	 * @throws If a block could not be constructed, but will not verify the correctness of all values.
 	 */
 	public static sign(block: UnsignedBlock, signPrefix: Buffer, privKey: PrivateKey): Block {
 		if (block.version !== 1) {
@@ -170,12 +171,12 @@ export class Block {
 	 * You can use Transaction.unmerge() to get an array of transactions from this.
 	 */
 	public getTransactions(): Buffer {
-		return this.data.slice(53, - 64);
+		return this.data.slice(53, -64);
 	}
 
 	/** Get the signature of this block. */
 	public getSignature(): Buffer {
-		return this.data.slice(- 64);
+		return this.data.slice(-64);
 	}
 
 	/**
@@ -185,7 +186,7 @@ export class Block {
 	public getHash(signPrefix: Buffer): Buffer {
 		return Crypto.hash256(Buffer.concat([
 			signPrefix,
-			this.data.slice(4, - 64)
+			this.data.slice(4, -64)
 		]));
 	}
 
@@ -197,7 +198,7 @@ export class Block {
 	public verifySignature(signPrefix: Buffer, pubKey: PublicKey): boolean {
 		//If we don't know yet if this signature is valid validate it now.
 		try {
-			return pubKey.verify(Buffer.concat([signPrefix, this.data.slice(4, - 64)]), this.getSignature());
+			return pubKey.verify(Buffer.concat([signPrefix, this.data.slice(4, -64)]), this.getSignature());
 		} catch (error) {
 			return false;
 		}
@@ -205,9 +206,9 @@ export class Block {
 
 	/**
 	 * Verify that the previousBlockHash and processedTimestamp are indeed correct compared to the previous block.
-	 * Will throw an error if the given previous block is not actually the previous block.
 	 * @param signPrefix The prefix to use to determine the currentblock and previous block hashes.
 	 * @param previousBlock The previous block or undefined if this is the first block.
+	 * @throws If the previous block id is not correct.
 	 */
 	public verifyWithPreviousBlock(signPrefix: Buffer, previousBlock: Block | undefined): boolean {
 		if (previousBlock !== undefined) {

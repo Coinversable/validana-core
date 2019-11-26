@@ -2,6 +2,9 @@
 	"extends": [
 		"tslint:recommended"
 	],
+	"linterOptions": {
+		"exclude": []
+	},
 	"rules": {
 		//Common standard to not prefix interfaces
 		"interface-name": [
@@ -83,6 +86,8 @@
 			"members"
 		],
 		//Avoid common mistakes
-		"strict-boolean-expressions": true
+		"strict-boolean-expressions": true,
+		//Wait till tslint supports typescript 3
+		"array-type": false
 	}
 }

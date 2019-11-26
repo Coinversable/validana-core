@@ -47,6 +47,5 @@ Build Validana Core
 
 Generating keys
 ---------------
-1. Make sure the project is build.
-2. Navigate to project root.
-3. Run `yarn --silent keys`, which will output a private key, public key and address.
+1. Navigate to project root.
+2. Run `yarn --silent keys` or `yarn --silent keysjson`

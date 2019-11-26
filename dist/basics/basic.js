@@ -1,244 +1,304 @@
 "use strict";
+/*!
+ * @license
+ * Copyright Coinversable B.V. All Rights Reserved.
+ *
+ * Use of this source code is governed by a AGPLv3-style license that can be
+ * found in the LICENSE file at https://validana.io/license
+ */
 Object.defineProperty(exports, "__esModule", { value: true });
 const pg_1 = require("pg");
 const log_1 = require("../tools/log");
 const crypto_1 = require("../tools/crypto");
 const sandbox_1 = require("./sandbox");
 const transaction_1 = require("./transaction");
-const key_1 = require("./key");
-pg_1.types.setTypeParser(20, (val) => {
-    return Number.parseInt(val, 10);
-});
+pg_1.types.setTypeParser(20, (val) => Number.parseInt(val, 10));
+pg_1.types.setTypeParser(1016, (val) => val.length === 2 ? [] : val.slice(1, -1).split(",").map((v) => Number.parseInt(v, 10)));
 var TxStatus;
 (function (TxStatus) {
     TxStatus["New"] = "new";
-    TxStatus["ProcessingAccepted"] = "processing_accepted";
-    TxStatus["ProcessingRejected"] = "processing_rejected";
     TxStatus["Invalid"] = "invalid";
     TxStatus["Accepted"] = "accepted";
     TxStatus["Rejected"] = "rejected";
 })(TxStatus = exports.TxStatus || (exports.TxStatus = {}));
 class Basic {
-    constructor(dbclient, signPrefix) {
+    constructor(dbclient, signPrefix, initHook) {
         this.contractMap = new Map();
+        this.isProcessing = false;
         this.dbclient = dbclient;
         this.signPrefix = signPrefix;
-        global.sha1 = crypto_1.Crypto.sha1;
-        global.sha256 = crypto_1.Crypto.sha256;
-        global.sha512 = crypto_1.Crypto.sha512;
-        global.md5 = crypto_1.Crypto.md5;
-        global.ripemd160 = crypto_1.Crypto.ripemd160;
-        global.isValidAddress = key_1.PublicKey.isValidAddress;
+        this.initHook = initHook;
     }
     async loadSmartContracts() {
-        const result = await this.query("SELECT contract_hash, creator, contract_type, contract_template, code FROM basics.contracts;", []);
-        if (result.error === undefined) {
-            this.contractMap.clear();
-            for (const row of result.rows) {
-                this.contractMap.set(row.contract_hash.toString(), {
-                    creator: row.creator,
-                    type: row.contract_type,
-                    template: row.contract_template,
-                    code: new Basic.AsyncFunction("payload", "from", "block", "processor", "previousBlockTimestamp", "previousBlockHash", "query", crypto_1.Crypto.binaryToUtf8(row.code))
-                });
+        const result = await this.query("SELECT contract_hash, creator, contract_type, contract_template, code, validana_version FROM basics.contracts;", []);
+        this.contractMap.clear();
+        for (const row of result.rows) {
+            let code = crypto_1.Crypto.binaryToUtf8(row.code);
+            if (row.validana_version !== 1) {
+                code = '"use strict";' + code;
             }
+            this.contractMap.set(row.contract_hash.toString(), {
+                creator: row.creator,
+                type: row.contract_type,
+                template: row.contract_template,
+                code: new Basic.AsyncFunction("payload", "from", "block", "processor", "previousBlockTimestamp", "previousBlockHash", "transactionId", "currentBlockTimestamp", code).bind(global),
+                validanaVersion: row.validana_version
+            });
         }
-        return result.error;
     }
-    async processTx(tx, currentBlockId, processorAddress, previousBlockTs, previousBlockHash, verifySignature = true) {
+    async processTx(unvalidatedTx, currentBlockId, currentBlockTs, processorAddress, previousBlockTs, previousBlockHash, verifySignature = true) {
+        if (this.isProcessing) {
+            throw new Error("Was still processing.");
+        }
+        this.isProcessing = true;
+        Basic.txError = undefined;
+        Basic.txErrorExitCode = 0;
         Basic.txShouldRetry = false;
         Basic.txInvalidReason = undefined;
         Basic.txRejectReason = undefined;
-        Basic.isCreatingContract = false;
+        Basic.processFastQueries.splice(0);
         Basic.isSpecialContract = false;
-        if (!(tx instanceof transaction_1.Transaction)) {
+        const validatedTx = await this.validateTx(unvalidatedTx, previousBlockTs, verifySignature);
+        if (validatedTx === undefined) {
+            return this.finishProcessingTx(validatedTx);
+        }
+        Basic.txContractHash = validatedTx.getContractHash();
+        const contract = this.contractMap.get(Basic.txContractHash.toString());
+        if (Basic.txContractHash.equals(Basic.createContractHash)) {
+            Basic.txRejectReason = validatedTx.verifyTemplate(Basic.createContractTemplate, 2);
+            Basic.isSpecialContract = true;
+        }
+        else if (Basic.txContractHash.equals(Basic.deleteContractHash)) {
+            Basic.txRejectReason = validatedTx.verifyTemplate(Basic.deleteContractTemplate, 2);
+            Basic.isSpecialContract = true;
+        }
+        else {
+            if (contract === undefined) {
+                Basic.txRejectReason = "Contract does not exist.";
+            }
+            else {
+                Basic.txRejectReason = validatedTx.verifyTemplate(contract.template, contract.validanaVersion);
+            }
+        }
+        if (Basic.txRejectReason !== undefined) {
+            return this.finishProcessingTx(validatedTx);
+        }
+        const from = validatedTx.getAddress();
+        const payload = JSON.parse(validatedTx.getPayloadBinary().toString());
+        sandbox_1.Sandbox.sandbox();
+        try {
+            if (Basic.txContractHash.equals(Basic.createContractHash)) {
+                Basic.txAcceptReason = await this.createContract(payload, from, currentBlockId, processorAddress, previousBlockTs, crypto_1.Crypto.binaryToHex(previousBlockHash), crypto_1.Crypto.binaryToHex(validatedTx.getId()), currentBlockTs);
+            }
+            else if (Basic.txContractHash.equals(Basic.deleteContractHash)) {
+                Basic.txAcceptReason = await this.deleteContract(payload, from);
+            }
+            else {
+                Basic.txAcceptReason = await contract.code(payload, from, currentBlockId, processorAddress, previousBlockTs, crypto_1.Crypto.binaryToHex(previousBlockHash), crypto_1.Crypto.binaryToHex(validatedTx.getId()), currentBlockTs);
+                if (typeof Basic.txAcceptReason !== "string") {
+                    Basic.txAcceptReason = "Unknown result type";
+                }
+            }
+        }
+        catch (error) {
             try {
-                tx = new transaction_1.Transaction(tx);
+                error = new Error(error.message.slice(0, 2000));
+            }
+            catch (error2) {
+                error = new Error("Unknown error message");
+            }
+            Basic.invalidate("Error during contract execution", false, error);
+            return this.finishProcessingTx(validatedTx);
+        }
+        return this.finishProcessingTx(validatedTx, contract === undefined ? 2 : contract.validanaVersion);
+    }
+    async validateTx(unvalidatedTx, previousBlockTs, verifySignature) {
+        if (!(unvalidatedTx instanceof transaction_1.Transaction)) {
+            try {
+                unvalidatedTx = new transaction_1.Transaction(unvalidatedTx);
             }
             catch (error) {
-                Basic.txInvalidReason = error.message;
-                return;
+                Basic.invalidate(error.message, false);
+                return undefined;
             }
         }
         if (verifySignature) {
             if (this.signPrefix === undefined) {
-                Basic.txShouldRetry = true;
-                Basic.txInvalidReason = "Cannot validate transaction signature without sign prefix.";
-                log_1.Log.error("Transaction prefix not set.");
-                return;
+                Basic.invalidate("Cannot validate transaction signature without sign prefix.", true, new Error("Transaction prefix not set."));
+                return undefined;
             }
-            if (!tx.verifySignature(this.signPrefix)) {
-                Basic.txInvalidReason = "Invalid signature.";
-                return;
+            if (!unvalidatedTx.verifySignature(this.signPrefix)) {
+                Basic.invalidate("Invalid signature.", false);
+                return undefined;
             }
         }
-        if (tx.validTill !== 0 && previousBlockTs >= tx.validTill) {
-            Basic.txInvalidReason = "Transaction valid till expired.";
-            return;
+        if (unvalidatedTx.validTill !== 0 && previousBlockTs >= unvalidatedTx.validTill) {
+            Basic.invalidate("Transaction valid till expired.", false);
+            return undefined;
         }
-        const payload = tx.getPayloadJson();
-        if (payload === undefined) {
-            Basic.txInvalidReason = "Transaction payload is not a valid json object.";
-            return;
-        }
-        Basic.txContractHash = tx.getContractHash();
-        const contract = this.contractMap.get(Basic.txContractHash.toString());
-        if (Basic.txContractHash.equals(Basic.createContractHash)) {
-            Basic.txInvalidReason = tx.verifyTemplate(Basic.createContractTemplate);
-        }
-        else if (Basic.txContractHash.equals(Basic.deleteContractHash)) {
-            Basic.txInvalidReason = tx.verifyTemplate(Basic.deleteContractTemplate);
-        }
-        else {
-            Basic.txRejectReason = tx.verifyTemplate(contract !== undefined ? contract.template : undefined);
-        }
-        if (Basic.txRejectReason !== undefined || Basic.txInvalidReason !== undefined) {
-            return;
-        }
-        const from = tx.getAddress();
-        sandbox_1.Sandbox.sandbox();
-        let result;
-        try {
-            if (Basic.txContractHash.equals(Basic.createContractHash)) {
-                Basic.isSpecialContract = true;
-                result = await this.createContract(payload, from, currentBlockId, processorAddress, previousBlockTs, crypto_1.Crypto.binaryToHex(previousBlockHash));
-            }
-            else if (Basic.txContractHash.equals(Basic.deleteContractHash)) {
-                Basic.isSpecialContract = true;
-                result = await this.deleteContract(payload, from);
-            }
-            else {
-                result = await contract.code(payload, from, currentBlockId, processorAddress, previousBlockTs, crypto_1.Crypto.binaryToHex(previousBlockHash), this.querySC);
-            }
-        }
-        catch (error) {
-            Basic.txContractHash = tx.getContractHash();
-            if (!Basic.txShouldRetry) {
-                if (typeof error === "string" || typeof error === "number") {
-                    sandbox_1.Sandbox.unSandbox();
-                    Basic.txInvalidReason = error.toString();
-                    log_1.Log.error(`Error during contract execution for transaction ${crypto_1.Crypto.binaryToHex(tx.getId())} ` +
-                        `(contract: ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)})`, new Error(error.toString()));
-                }
-                else if (error instanceof Error) {
-                    try {
-                        error = new Error(error.message);
-                    }
-                    catch (_a) {
-                        error = new Error("Unknown error message");
-                    }
-                    sandbox_1.Sandbox.unSandbox();
-                    Basic.txInvalidReason = error.message;
-                    log_1.Log.error(`Error during contract execution for transaction ${crypto_1.Crypto.binaryToHex(tx.getId())} ` +
-                        `(contract: ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)})`, error);
+        return unvalidatedTx;
+    }
+    async finishProcessingTx(validatedTx, version = 2) {
+        var _a;
+        await Promise.all(Basic.processFastQueries);
+        sandbox_1.Sandbox.unSandbox();
+        if (validatedTx !== undefined) {
+            if (Basic.txError !== undefined) {
+                if (Basic.txErrorExitCode !== 0) {
+                    await Basic.shutdown(Basic.txErrorExitCode, "Error during contract execution for transaction " +
+                        `${crypto_1.Crypto.binaryToHex(validatedTx.getId())} (contract: ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)})`, Basic.txError);
                 }
                 else {
-                    sandbox_1.Sandbox.unSandbox();
-                    Basic.txInvalidReason = "Unknown error type";
-                    log_1.Log.error(`Error during contract execution for transaction ${crypto_1.Crypto.binaryToHex(tx.getId())} ` +
-                        `(contract: ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)})`, new Error("Unknown contract return type"));
-                }
-                return;
-            }
-        }
-        sandbox_1.Sandbox.unSandbox();
-        if (typeof result !== "string") {
-            Basic.txRejectReason = "Unknown result type";
-        }
-        else if (result !== "OK") {
-            Basic.txRejectReason = result;
-        }
-        if ((tx.getContractHash().equals(Basic.createContractHash) || tx.getContractHash().equals(Basic.deleteContractHash)) && Basic.txRejectReason !== undefined) {
-            Basic.txInvalidReason = Basic.txRejectReason;
-        }
-        if (Basic.txInvalidReason === undefined && !Basic.txShouldRetry) {
-            if (Basic.txContractHash.equals(Basic.createContractHash)) {
-                if (payload.code !== "") {
-                    const binaryPayloadCode = crypto_1.Crypto.base64ToBinary(payload.code);
-                    const contractHash = crypto_1.Crypto.hash256(binaryPayloadCode);
-                    const contractFunction = new Basic.AsyncFunction("payload", "from", "block", "processor", "previousBlockTimestamp", "previousBlockHash", "query", crypto_1.Crypto.binaryToUtf8(binaryPayloadCode));
-                    this.contractMap.set(contractHash.toString(), {
-                        creator: from,
-                        template: JSON.parse(payload.template),
-                        code: contractFunction,
-                        type: payload.type
-                    });
+                    await log_1.Log.error(`Error during contract execution for transaction ${crypto_1.Crypto.binaryToHex(validatedTx.getId())} ` +
+                        `(contract: ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)})`, Basic.txError);
                 }
             }
-            else if (Basic.txContractHash.equals(Basic.deleteContractHash)) {
-                this.contractMap.delete(crypto_1.Crypto.hexToBinary(payload.hash).toString());
+            if (validatedTx.getContractHash().equals(Basic.createContractHash) || validatedTx.getContractHash().equals(Basic.deleteContractHash)) {
+                if (Basic.txRejectReason !== undefined) {
+                    Basic.invalidate(Basic.txRejectReason, false);
+                }
+                if (Basic.txInvalidReason === undefined) {
+                    if (validatedTx.getContractHash().equals(Basic.createContractHash)) {
+                        const payload = validatedTx.getPayloadJson();
+                        if (typeof payload.code === "string" && payload.code !== "") {
+                            const binaryPayloadCode = crypto_1.Crypto.base64ToBinary(payload.code);
+                            const validanaVersion = (_a = payload.validanaVersion, (_a !== null && _a !== void 0 ? _a : 1));
+                            let code = crypto_1.Crypto.binaryToUtf8(binaryPayloadCode);
+                            if (validanaVersion !== 1) {
+                                code = '"use strict";' + code;
+                            }
+                            const contractHash = crypto_1.Crypto.hash256(code);
+                            const contractFunction = new Basic.AsyncFunction("payload", "from", "block", "processor", "previousBlockTimestamp", "previousBlockHash", "transactionId", "currentBlockTimestamp", code).bind(global);
+                            this.contractMap.set(contractHash.toString(), {
+                                creator: validatedTx.getAddress(),
+                                template: typeof payload.template === "string" ? JSON.parse(payload.template) : payload.template,
+                                validanaVersion,
+                                code: contractFunction,
+                                type: payload.type
+                            });
+                        }
+                    }
+                    else {
+                        const payload = validatedTx.getPayloadJson();
+                        this.contractMap.delete(crypto_1.Crypto.hexToBinary(payload.hash).toString());
+                    }
+                }
             }
+        }
+        this.isProcessing = false;
+        if (Basic.txShouldRetry) {
+            return { status: "retry", message: "" };
+        }
+        if (Basic.txInvalidReason !== undefined) {
+            return { status: TxStatus.Invalid, message: Basic.txInvalidReason };
+        }
+        if (Basic.txRejectReason !== undefined) {
+            return { status: TxStatus.Rejected, message: Basic.txRejectReason };
+        }
+        if (version === 1 && Basic.txAcceptReason !== "OK") {
+            return { status: "v1Rejected", message: Basic.txAcceptReason };
+        }
+        else {
+            return { status: TxStatus.Accepted, message: Basic.txAcceptReason };
         }
     }
-    async createContract(payload, from, currentBlockId, processor, previousBlockTs, previousBlockHash) {
+    async createContract(payload, from, currentBlockId, processor, previousBlockTs, previousBlockHash, transactionId, currentBlockTs) {
+        var _a, _b, _c, _d, _e;
         if (from !== processor) {
-            return "User is not allowed to create a contract.";
+            return Basic.reject("User is not allowed to create a contract.");
         }
         if (payload.type.length > 64) {
-            return "Trying to create an invalid contract: type too long";
+            return Basic.reject("Trying to create an invalid contract: type too long");
         }
         if (payload.version.length > 32) {
-            return "Trying to create an invalid contract: version too long";
+            return Basic.reject("Trying to create an invalid contract: version too long");
         }
         if (payload.description.length > 256) {
-            return "Trying to create an invalid contract: description too long";
+            return Basic.reject("Trying to create an invalid contract: description too long");
         }
-        const contractTemplate = JSON.parse(payload.template);
-        if (typeof contractTemplate !== "object") {
-            return "Trying to create an invalid contract: template is not an object.";
+        const validanaVersion = (_a = payload.validanaVersion, (_a !== null && _a !== void 0 ? _a : 1));
+        if (validanaVersion < 1 || validanaVersion > 2) {
+            return Basic.reject("Unsupported contract version");
         }
-        for (const value of Object.keys(contractTemplate)) {
-            if (typeof contractTemplate[value] !== "object" || Object.keys(contractTemplate[value]).length > 3 ||
-                typeof contractTemplate[value].type !== "string" || typeof contractTemplate[value].desc !== "string" ||
-                typeof contractTemplate[value].name !== "string") {
-                return `Trying to create an invalid contract: template has invalid values: ${value}`;
+        if (typeof payload.template === "string") {
+            payload.template = JSON.parse(payload.template);
+        }
+        if (typeof payload.template !== "object" || payload.template === null || payload.template instanceof Array) {
+            return Basic.reject("Trying to create an invalid contract: template is not an object.");
+        }
+        for (const key of Object.keys(payload.template)) {
+            const value = payload.template[key];
+            if (key.length > 64 ||
+                typeof value !== "object" || value === null || value instanceof Array || Object.keys(value).length > 3 ||
+                typeof value.type !== "string" || value.type.length > 64 ||
+                typeof value.name !== "string" || value.name.length > 64 ||
+                typeof value.desc !== "string" || value.desc.length > 256) {
+                return Basic.reject(`Trying to create an invalid contract: template has invalid values: ${key}`);
             }
         }
         if (payload.init === "" && payload.code === "") {
-            return "Trying to create an invalid contract: init and/or code has to be defined";
+            return Basic.reject("Trying to create an invalid contract: init and/or code has to be defined");
         }
-        const initCode = crypto_1.Crypto.binaryToUtf8(crypto_1.Crypto.base64ToBinary(payload.init));
+        let initCode = crypto_1.Crypto.binaryToUtf8(crypto_1.Crypto.base64ToBinary(payload.init));
+        if (validanaVersion !== 1) {
+            initCode = '"use strict";' + initCode;
+        }
         const initCheck = this.checkCode(initCode, payload.type);
         if (initCheck !== undefined) {
-            return initCheck;
+            return Basic.reject(initCheck);
         }
-        const initFunction = new Basic.AsyncFunction("from", "block", "processor", "previousBlockTimestamp", "previousBlockHash", "query", initCode);
+        const initFunction = new Basic.AsyncFunction("from", "block", "processor", "previousBlockTimestamp", "previousBlockHash", "transactionId", "currentBlockTimestamp", initCode).bind(global);
         const contractBuffer = crypto_1.Crypto.base64ToBinary(payload.code);
-        const contractCode = crypto_1.Crypto.binaryToUtf8(contractBuffer);
+        let contractCode = crypto_1.Crypto.binaryToUtf8(contractBuffer);
+        if (validanaVersion !== 1) {
+            contractCode = '"use strict";' + contractCode;
+        }
         const codeCheck = this.checkCode(contractCode, payload.type);
         if (codeCheck !== undefined) {
-            return codeCheck;
+            return Basic.reject(codeCheck);
         }
-        new Basic.AsyncFunction("payload", "from", "block", "processor", "previousBlockTimestamp", "previousBlockHash", "query", contractCode);
-        const contractHash = crypto_1.Crypto.hash256(contractBuffer);
+        new Basic.AsyncFunction("payload", "from", "block", "processor", "previousBlockTimestamp", "previousBlockHash", "transactionId", "currentBlockTimestamp", contractCode).bind(global);
+        Basic.querySCFast("SET LOCAL ROLE smartcontractmanager;", []);
+        const contractHash = crypto_1.Crypto.hash256(contractCode);
         if (contractHash.equals(Basic.createContractHash) || contractHash.equals(Basic.deleteContractHash)) {
-            return "Trying to create contract: created contract hash has an impossible value";
+            return Basic.reject("Trying to create contract: created contract hash has an impossible value");
         }
-        else if ((await this.querySC("SELECT", "basics.contracts", "WHERE contract_hash = $1;", [contractHash])).rows.length > 0) {
-            return `Trying to create an invalid contract: contract already exists`;
+        else {
+            if ((await Basic.querySC("SELECT FROM basics.contracts WHERE contract_hash = $1;", [contractHash])).rows.length > 0) {
+                return Basic.reject("Trying to create an invalid contract: contract already exists");
+            }
         }
         if (payload.init !== "") {
-            Basic.isCreatingContract = true;
+            const statementTimeout = (await Basic.querySC("SHOW statement_timeout;", [])).rows[0].statement_timeout;
+            Basic.querySCFast("SET LOCAL statement_timeout = 0;", []);
+            Basic.querySCFast("SET LOCAL ROLE smartcontract;", []);
+            (_c = (_b = this).initHook) === null || _c === void 0 ? void 0 : _c.call(_b, true);
             Basic.isSpecialContract = false;
             Basic.txContractHash = contractHash;
-            await Promise.resolve(initFunction(from, currentBlockId, processor, previousBlockTs, previousBlockHash, this.querySC));
-            Basic.isCreatingContract = false;
+            await initFunction(from, currentBlockId, processor, previousBlockTs, previousBlockHash, transactionId, currentBlockTs).catch((e) => {
+                var _a, _b;
+                Basic.txContractHash = Basic.createContractHash;
+                (_b = (_a = this).initHook) === null || _b === void 0 ? void 0 : _b.call(_a, false);
+                throw e;
+            });
             Basic.isSpecialContract = true;
             Basic.txContractHash = Basic.createContractHash;
+            (_e = (_d = this).initHook) === null || _e === void 0 ? void 0 : _e.call(_d, false);
+            await Basic.querySC(`SET LOCAL statement_timeout = '${statementTimeout}';`, []);
         }
         if (payload.code !== "") {
-            const params = [contractHash, payload.type, payload.version, payload.description, from, payload.template, crypto_1.Crypto.base64ToBinary(payload.code)];
-            await this.querySC("INSERT", "basics.contracts", "(contract_hash, contract_type, contract_version, description, creator, contract_template, code) " +
-                "VALUES ($1, $2, $3, $4, $5, $6, $7);", params);
+            const params = [contractHash, payload.type, payload.version, payload.description, from,
+                payload.template, crypto_1.Crypto.base64ToBinary(payload.code), validanaVersion];
+            Basic.querySCFast("SET LOCAL ROLE smartcontractmanager;", []);
+            Basic.querySCFast("INSERT INTO basics.contracts (contract_hash, contract_type, contract_version, description, "
+                + "creator, contract_template, code, validana_version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);", params);
         }
+        Basic.querySCFast("SET LOCAL ROLE smartcontract;", []);
         return "OK";
     }
     checkCode(code, contractName) {
-        if (code.search(/try.*catch/s) !== -1) {
-            return `Trying to create an invalid contract (${contractName}): contract may not use 'try catch'`;
-        }
-        if (code.indexOf("throw") !== -1) {
-            return `Trying to create an invalid contract (${contractName}): contract may not use 'throw'`;
+        if (code.search(/try[^]+?catch/) !== -1) {
+            return `Trying to create an invalid contract (${contractName}): contract may not use 'try catch', instead use 'await query().catch()'.`;
         }
         if (code.search(/(?<!await\s)query\s*\(/) !== -1) {
             return `Trying to create an invalid contract (${contractName}): contract must use 'await query()' instead of 'query()'`;
@@ -246,15 +306,12 @@ class Basic {
         return undefined;
     }
     async deleteContract(payload, from) {
-        const binaryHash = crypto_1.Crypto.hexToBinary(payload.hash);
-        const result = await this.querySC("SELECT", "basics.contracts", "WHERE contract_hash = $1", [binaryHash]);
-        if (result.rows.length === 0) {
-            return `Trying to delete an unexisting contract: ${payload.hash}`;
+        Basic.querySCFast("SET LOCAL ROLE smartcontractmanager;", []);
+        const result = await Basic.querySC("DELETE FROM basics.contracts WHERE contract_hash = $1 AND creator = $2;", [crypto_1.Crypto.hexToBinary(payload.hash), from]);
+        if (result.rowCount === 0) {
+            return Basic.reject(`Not creator of contract or contract: ${payload.hash} does not exist.`);
         }
-        if (from !== result.rows[0].creator) {
-            return "Only the creator is allowed to delete a contract.";
-        }
-        await this.querySC("DELETE", "basics.contracts", "WHERE contract_hash = $1;", [binaryHash]);
+        Basic.querySCFast("SET LOCAL ROLE smartcontract;", []);
         return "OK";
     }
     async connect() {
@@ -273,86 +330,100 @@ class Basic {
                 if (this.dbclient.password !== undefined) {
                     error.message = error.message.replace(new RegExp(this.dbclient.password, "g"), "");
                 }
-                log_1.Log.warn("Failed to connect with the database.", error);
-                Basic.client = undefined;
+                if (error.code === "53300") {
+                    await Basic.shutdown(50, "Another instance is already running, shutting down to prevent errors.", error);
+                }
+                else {
+                    log_1.Log.warn("Failed to connect with the database.", error);
+                    Basic.client = undefined;
+                }
             }
+            return true;
+        }
+        else {
+            return false;
         }
     }
-    async query(query, values, name) {
-        const request = { text: query, values };
+    async query(query, params, name) {
+        const request = { text: query, values: params };
         if (name !== undefined) {
             request.name = name;
         }
         if (Basic.client === undefined) {
-            return { command: query, rowCount: 0, rows: [], oid: 0, error: new Error("No connection"), fields: [] };
+            throw new Error("No connection");
         }
         try {
             return await Basic.client.query(request);
         }
         catch (error) {
-            if (error.code === "53300") {
-                await log_1.Log.fatal("Another instance is already running, shutting down to prevent errors.", error);
-                await Basic.shutdown(50);
+            if (error.code === "XX001" || error.code === "XX002") {
+                log_1.Log.info(`Database or index corrupted for query ${query} and params ${JSON.stringify(params)}.`);
+                await Basic.shutdown(51, "Database or index corrupted. Shutting down.", error);
             }
-            else if (error.code === "XX001" || error.code === "XX002") {
-                log_1.Log.info(`Database or index corrupted for query ${query} and params ${values}.`);
-                await log_1.Log.fatal("Database or index corrupted. Shutting down.", error);
-                await Basic.shutdown(51);
-            }
-            return { command: query, rowCount: 0, rows: [], oid: 0, error, fields: [] };
+            throw error;
         }
     }
-    async querySC(action, table, info, params, usePrivate = false) {
+    static async querySC(query, params) {
+        if (typeof query !== "string" || !(params instanceof Array)) {
+            [query, params] = Basic.convertV1(...arguments);
+        }
+        query = query.trim();
+        if (!query.endsWith(";")) {
+            query += ";";
+        }
+        if (query.search(/;|--|localtime|current_(?:date|time)/i) !== query.length - 1) {
+            const error = new Error("Invalid query: multiple queries, comments or time request.");
+            Basic.invalidate("Invalid query: multiple queries, comments or time request.", false, error);
+            throw error;
+        }
+        if (query.search(/^(?:alter\s+(?:index|table|type)|create\s+(?:(?:unique\s+)?index|table|type)|delete|drop\s+(?:index|table|type)|insert|select|update|with)/i) !== 0) {
+            if (!Basic.isSpecialContract && query.search(/^SET LOCAL (?:ROLE smartcontract(?:manager)?;|statement_timeout = .*)|SHOW statement_timeout;$/) !== 0) {
+                const error = new Error(`Invalid query: invalid action for query ${query}.`);
+                Basic.invalidate("Invalid query: action not allowed.", false, error);
+                throw error;
+            }
+        }
+        if (Basic.client === undefined) {
+            const error = new Error("No database connection");
+            Basic.invalidate("No database connection.", true, error);
+            throw error;
+        }
+        try {
+            const result = await Basic.client.query(query, params);
+            return { rows: result.rows, rowCount: result.rowCount };
+        }
+        catch (error) {
+            if (typeof error.code !== "string") {
+                Basic.invalidate("Unknown error during execution", false, error, 2);
+            }
+            else if (error.code === "XX001" || error.code === "XX002") {
+                Basic.invalidate("Database corrupted", true, new Error(`Database or index corrupted for query ${query} and params ${JSON.stringify(params)}.`), 51);
+            }
+            else if (error.code.startsWith("08") && error.code !== "08P01") {
+                Basic.invalidate("Database connection problem.", true, error);
+            }
+            else if (error.code.startsWith("23")) {
+                const error2 = new Error(`${error.message}, when executing query: ${query}, and params: ${JSON.stringify(params)}`);
+                error2.stack = error2.message;
+                error2.code = error.code;
+                throw error2;
+            }
+            else {
+                error.message = `${error.message}, while executing contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} for query: ${query}`;
+                Basic.invalidate("Error during contract execution", false, error);
+            }
+            throw error;
+        }
+    }
+    static querySCFast(query, params) {
+        Basic.processFastQueries.push(Basic.querySC(query, params).catch((error) => Basic.invalidate("Error during contract execution", false, error)));
+    }
+    static convertV1(action, table, info, params, usePrivate = false) {
         if (typeof action !== "string" || typeof table !== "string" || typeof info !== "string"
             || typeof usePrivate !== "boolean" || !(params instanceof Array)) {
-            sandbox_1.Sandbox.unSandbox();
-            log_1.Log.error(`Smart contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} tried to execute an invalid query (wrong type)`);
-            sandbox_1.Sandbox.sandbox();
-            throw new Error("Invalid query request: missing or wrong type of parameters.");
-        }
-        params = new Array(...params);
-        for (let i = 0; i < params.length; i++) {
-            if (typeof params[i] === "object") {
-                if (params[i] instanceof Buffer) {
-                    params[i] = Buffer.from(params[i]);
-                }
-                else {
-                    throw new Error("Invalid query request: params may not contain non-Buffer objects.");
-                }
-            }
-        }
-        sandbox_1.Sandbox.unSandbox();
-        if ((action === "CREATE" || action === "DROP" || action === "ALTER" || action === "INDEX" || action === "UNIQUE INDEX" || action === "DROP INDEX")) {
-            if (!Basic.isCreatingContract) {
-                log_1.Log.error(`Smart contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} tried to execute an invalid query during create (action ${action})`);
-                sandbox_1.Sandbox.sandbox();
-                throw new Error("Action not allowed for smart contracts");
-            }
-        }
-        else if (action !== "SELECT" && action !== "INSERT" && action !== "UPDATE" && action !== "DELETE") {
-            log_1.Log.error(`Smart contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} tried to execute an invalid query (action: ${action})`);
-            sandbox_1.Sandbox.sandbox();
-            throw new Error("Action not allowed for smart contracts");
-        }
-        if (table === "basics.contracts") {
-            if (!Basic.isSpecialContract) {
-                log_1.Log.error(`Smart contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} tried to execute an invalid query as non-special contract (table: ${table})`);
-                sandbox_1.Sandbox.sandbox();
-                throw new Error("Table not allowed for smart contracts");
-            }
-        }
-        else if ((table === "" && action !== "DROP INDEX") || table.length >= 30 || table.indexOf(".") !== -1) {
-            log_1.Log.error(`Smart contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} tried to execute an invalid query (table: ${table})`);
-            sandbox_1.Sandbox.sandbox();
-            throw new Error("Table not allowed for smart contracts");
-        }
-        if (!info.endsWith(";")) {
-            info += ";";
-        }
-        if (table.match(/;|--/) !== null || info.match(/;|--/g).length > 1) {
-            log_1.Log.error(`Smart contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} tried to execute an invalid query (multiple or comments: ${table} ${info})`);
-            sandbox_1.Sandbox.sandbox();
-            throw new Error("Smart contracts are not allowed to execute multiple queries or use comments.");
+            const error = new Error(`Invalid query: Smart contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} tried to execute an invalid query (wrong type)`);
+            Basic.invalidate("Invalid query: invalid parameters.", false, error);
+            throw error;
         }
         let query = "";
         switch (action) {
@@ -389,60 +460,33 @@ class Basic {
                 query += "DROP INDEX IF EXISTS ";
                 break;
             default:
-                log_1.Log.error(`Invalid query ${action} action after checking the query actions.`);
-                sandbox_1.Sandbox.sandbox();
-                throw new Error("Action not allowed for smart contracts");
+                const error = new Error(`Invalid query: Invalid action ${action}`);
+                Basic.invalidate("Invalid query: Invalid action", false, error);
+                throw error;
         }
         if (action !== "DROP INDEX") {
             query += `${table}${usePrivate ? `_${crypto_1.Crypto.binaryToHex(Basic.txContractHash).slice(0, 32)}` : ""} `;
         }
         query += info;
-        const request = { text: query, values: params };
-        if (Basic.client === undefined) {
-            Basic.txShouldRetry = true;
-            sandbox_1.Sandbox.sandbox();
-            throw new Error("No connection");
-        }
-        try {
-            const result = await Basic.client.query(request);
-            sandbox_1.Sandbox.sandbox();
-            return result;
-        }
-        catch (error) {
-            if (typeof error.code !== "string") {
-                Basic.txShouldRetry = true;
-                Basic.txInvalidReason = "Unknown error during executions";
-                await log_1.Log.fatal("Unknown error while querying database for smart contract.", error);
-                await Basic.shutdown(2);
-            }
-            else if (error.code === "53300") {
-                Basic.txShouldRetry = true;
-                Basic.txInvalidReason = "Multiple instances running";
-                await log_1.Log.fatal("Another instance is already running, shutting down to prevent errors.", error);
-                await Basic.shutdown(50);
-            }
-            else if (error.code === "XX001" || error.code === "XX002") {
-                Basic.txShouldRetry = true;
-                Basic.txInvalidReason = "Database corrupted";
-                log_1.Log.info(`Database or index corrupted for query ${query} and params ${params}.`);
-                await log_1.Log.fatal("Database or index corrupted. Shutting down.", error);
-                await Basic.shutdown(51);
-            }
-            else if (!Basic.txShouldRetry && Basic.txInvalidReason === undefined) {
-                if (error.code.startsWith("2") || error.code.startsWith("4") || error.code === "08P01" || error.code === "0A000") {
-                    log_1.Log.error(`Contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} is executing an invalid query: ${query}, with values: ${params}`, error);
-                }
-                else {
-                    log_1.Log.warn(`Error while executing contract ${crypto_1.Crypto.binaryToHex(Basic.txContractHash)} for query: ${query}`, error);
-                    Basic.txShouldRetry = true;
-                }
-            }
-            sandbox_1.Sandbox.sandbox();
-            throw error;
+        return [query, params];
+    }
+    static reject(reason) {
+        if (Basic.txRejectReason === undefined) {
+            Basic.txRejectReason = typeof reason === "string" ? reason : "Unknown reject reason";
         }
     }
-    static async shutdown(exitCode = 0) {
+    static invalidate(reason, retry, error, exitCode = 0) {
+        if (Basic.txInvalidReason === undefined) {
+            Basic.txInvalidReason = reason;
+            Basic.txShouldRetry = retry;
+            Basic.txError = error;
+            Basic.txErrorExitCode = exitCode;
+        }
+    }
+    static async shutdown(exitCode = 0, message, error) {
+        sandbox_1.Sandbox.unSandbox();
         if (Basic.client !== undefined) {
+            Basic.isShuttingDown = true;
             try {
                 await Basic.client.end();
             }
@@ -453,24 +497,31 @@ class Basic {
                 }
             }
         }
+        if (message !== undefined) {
+            await log_1.Log.fatal(message, error);
+        }
         return process.exit(exitCode);
     }
 }
 exports.Basic = Basic;
 Basic.createContractHash = Buffer.alloc(32, 0);
 Basic.createContractTemplate = {
-    type: { type: "string" },
-    version: { type: "string" },
-    description: { type: "string" },
+    type: { type: "str" },
+    version: { type: "str" },
+    description: { type: "str" },
     template: { type: "json" },
     init: { type: "base64" },
-    code: { type: "base64" }
+    code: { type: "base64" },
+    validanaVersion: { type: "uint?" }
 };
 Basic.deleteContractHash = Buffer.alloc(32, 255);
 Basic.deleteContractTemplate = {
     hash: { type: "hash" }
 };
 Basic.AsyncFunction = Object.getPrototypeOf(async () => { }).constructor;
+Basic.txErrorExitCode = 0;
 Basic.txShouldRetry = false;
-Basic.isCreatingContract = false;
+Basic.processFastQueries = [];
 Basic.isSpecialContract = false;
+Basic.isShuttingDown = false;
+//# sourceMappingURL=basic.js.map

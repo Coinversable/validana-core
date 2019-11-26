@@ -1,6 +1,6 @@
 {
 	"name": "@coinversable/validana-core",
-	"version": "1.0.1",
+	"version": "2.0.1",
 	"description": "The Validana core components.",
 	"author": "Coinversable BV",
 	"homepage": "https://validana.io/",
@@ -17,12 +17,17 @@
 		"core"
 	],
 	"files": [
-		"dist"
+		"dist",
+		"!dist/__tests__",
+		"!dist/dist/**/*.js.map"
 	],
 	"scripts": {
-		"build": "tsc -p .",
-		"keys": "node -e \"const key = require('./dist/basics/key.js').PrivateKey.generate(); console.log(key.toWIF(), key.publicKey.toString('hex'), key.getAddress())\"",
-		"tslint": "tslint --project tsconfig.json -c tslint.json src/**/*.ts"
+		"build": "tsc && tsc --declaration true --emitDeclarationOnly true --removeComments false",
+		"keys": "node --no-warnings -e \"const PK = require('./dist/basics/key.js').PrivateKey; const key = process.argv[1] ? PK.fromWIF(process.argv[1]) : PK.generate(); console.log(key.toWIF(), key.publicKey.toString('hex'), key.getAddress())\"",
+		"keysjson": "node --no-warnings -pe \"const PK = require('./dist/basics/key.js').PrivateKey; const key = process.argv[1] ? PK.fromWIF(process.argv[1]) : PK.generate(); JSON.stringify({privateKey: key.toWIF(), publicKey: key.publicKey.toString('hex'), address: key.getAddress()})\"",
+		"tslint": "tslint --project tsconfig.json -c tslint.json && tslint --project src/__tests__/tsconfig.json -c tslint.json",
+		"test": "tsc -p src/__tests__/tsconfig.json && nyc jasmine dist/__tests__/**/*.js",
+		"testall": "tsc -p src/__tests__/tsconfig.json && nyc jasmine dist/__tests__/**/*.js INTEGRATION=true"
 	},
 	"dependencies": {
 		"@types/node": "*",
@@ -32,7 +37,25 @@
 		"raven": "^2.4.2"
 	},
 	"devDependencies": {
+		"@types/jasmine": "*",
 		"tslint": "^5.0.0",
 		"typescript": "^3.0.0"
+	},
+	"nyc": {
+		"sourceMap": false,
+		"check-coverage": false,
+		"all": true,
+		"include": [
+			"dist/**/*.js"
+		],
+		"exclude": [
+			"dist/__tests__/**/*.js"
+		],
+		"reporter": [
+			"html",
+			"text-summary"
+		],
+		"temp-dir": "dist/__tests__/.nyc_output",
+		"report-dir": "dist/__tests__/.coverage"
 	}
 }
