@@ -456,6 +456,7 @@ class Basic {
         return process.exit(exitCode);
     }
 }
+exports.Basic = Basic;
 Basic.createContractHash = Buffer.alloc(32, 0);
 Basic.createContractTemplate = {
     type: { type: "string" },
@@ -473,5 +474,3 @@ Basic.AsyncFunction = Object.getPrototypeOf(async () => { }).constructor;
 Basic.txShouldRetry = false;
 Basic.isCreatingContract = false;
 Basic.isSpecialContract = false;
-exports.Basic = Basic;
-//# sourceMappingURL=basic.js.map

@@ -16,4 +16,3 @@ exports.PublicKey = key_1.PublicKey;
 exports.PrivateKey = key_1.PrivateKey;
 var sandbox_1 = require("./basics/sandbox");
 exports.Sandbox = sandbox_1.Sandbox;
-//# sourceMappingURL=index.js.map

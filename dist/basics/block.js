@@ -131,6 +131,5 @@ class Block {
         }
     }
 }
-Block.emptyLength = 113;
 exports.Block = Block;
-//# sourceMappingURL=block.js.map
+Block.emptyLength = 113;

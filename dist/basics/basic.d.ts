@@ -34,7 +34,7 @@ export declare enum TxStatus {
     ProcessingRejected = "processing_rejected",
     Invalid = "invalid",
     Accepted = "accepted",
-    Rejected = "rejected",
+    Rejected = "rejected"
 }
 export interface Contract {
     creator: string;
@@ -64,11 +64,11 @@ export declare class Basic {
     constructor(dbclient: DatabaseClient, signPrefix?: Buffer);
     protected loadSmartContracts(): Promise<Error | undefined>;
     protected processTx(tx: DBTransaction | Buffer | Transaction, currentBlockId: number, processorAddress: string, previousBlockTs: number, previousBlockHash: Buffer, verifySignature?: boolean): Promise<void>;
-    private createContract(payload, from, currentBlockId, processor, previousBlockTs, previousBlockHash);
-    private checkCode(code, contractName);
-    private deleteContract(payload, from);
+    private createContract;
+    private checkCode;
+    private deleteContract;
     protected connect(): Promise<void>;
     protected query(query: string, values: Array<string | number | boolean | Buffer>, name?: string): Promise<QueryStatus>;
-    private querySC(action, table, info, params, usePrivate?);
+    private querySC;
     static shutdown(exitCode?: number): Promise<never>;
 }

@@ -1,3 +1,5 @@
+This is the semi-annual release channel for Validana. For the latest version contact us via info@coinversable.com.
+
 About Validana.io
 =================
 
@@ -28,7 +30,6 @@ Setup development environment
 -----------------------------
 1. Install Node.js 7.6 or later (https://nodejs.org/en/download/)
 2. Install yarn (https://yarnpkg.com/en/docs/install)
-3. Run `yarn global add typescript tslint`
 
 Setup Validana Core
 -------------------
@@ -48,4 +49,4 @@ Generating keys
 ---------------
 1. Make sure the project is build.
 2. Navigate to project root.
-3. Run `yarn run keys`
+3. Run `yarn --silent keys`, which will output a private key, public key and address.

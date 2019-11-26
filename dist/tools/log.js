@@ -103,6 +103,7 @@ class Log {
         });
     }
 }
+exports.Log = Log;
 Log.Debug = 0;
 Log.Info = 1;
 Log.Warning = 2;
@@ -122,5 +123,3 @@ Log.options = {
     },
     extra: {}
 };
-exports.Log = Log;
-//# sourceMappingURL=log.js.map

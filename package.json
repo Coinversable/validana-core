@@ -1,11 +1,10 @@
 {
-	"name": "validana-core",
-	"version": "1.0.0",
-	"private": true,
+	"name": "@coinversable/validana-core",
+	"version": "1.0.1",
 	"description": "The Validana core components.",
 	"author": "Coinversable BV",
 	"homepage": "https://validana.io/",
-	"license": "GNU AGPLv3",
+	"license": "AGPL-3.0-only",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/Coinversable/validana-core.git"
@@ -16,6 +15,9 @@
 		"coinversable",
 		"validana",
 		"core"
+	],
+	"files": [
+		"dist"
 	],
 	"scripts": {
 		"build": "tsc -p .",
@@ -28,5 +30,9 @@
 		"@types/raven": "^2.1.6",
 		"pg": "^7.4.1",
 		"raven": "^2.4.2"
+	},
+	"devDependencies": {
+		"tslint": "^5.0.0",
+		"typescript": "^3.0.0"
 	}
 }

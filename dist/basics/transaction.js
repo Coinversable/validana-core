@@ -237,7 +237,6 @@ class Transaction {
         return undefined;
     }
 }
+exports.Transaction = Transaction;
 Transaction.maxPayloadLength = 100000;
 Transaction.emptyLength = 154;
-exports.Transaction = Transaction;
-//# sourceMappingURL=transaction.js.map

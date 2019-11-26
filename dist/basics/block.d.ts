@@ -12,7 +12,7 @@ export interface DBBlock extends UnsignedBlock {
     signature: Buffer;
 }
 export declare class Block {
-    static readonly emptyLength: number;
+    static readonly emptyLength = 113;
     readonly data: Buffer;
     readonly version: number;
     readonly totalLength: number;

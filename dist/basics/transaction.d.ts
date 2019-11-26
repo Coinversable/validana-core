@@ -13,8 +13,8 @@ export interface DBTransaction extends UnsignedTx {
     public_key: Buffer;
 }
 export declare class Transaction {
-    static readonly maxPayloadLength: number;
-    static readonly emptyLength: number;
+    static readonly maxPayloadLength = 100000;
+    static readonly emptyLength = 154;
     readonly data: Buffer;
     readonly version: number;
     readonly validTill: number;
@@ -36,5 +36,5 @@ export declare class Transaction {
     getPayloadJson(): object | undefined;
     verifySignature(signPrefix: Buffer): boolean;
     verifyTemplate(template: Template | undefined): string | undefined;
-    private checkType(value, type);
+    private checkType;
 }

@@ -76,8 +76,8 @@ class PublicKey {
         return Encryption.createVerify("SHA256").update(crypto_1.Crypto.sha256(data)).verify(this.publicKeyPem, derSignature);
     }
 }
-PublicKey.publicStart = crypto_1.Crypto.hexToBinary("3036301006072a8648ce3d020106052b8104000a032200");
 exports.PublicKey = PublicKey;
+PublicKey.publicStart = crypto_1.Crypto.hexToBinary("3036301006072a8648ce3d020106052b8104000a032200");
 class PrivateKey extends PublicKey {
     constructor(privateKey, publicKey) {
         if (publicKey === undefined) {
@@ -144,8 +144,7 @@ class PrivateKey extends PublicKey {
         return Buffer.concat([r, s]);
     }
 }
+exports.PrivateKey = PrivateKey;
 PrivateKey.secp256k1 = Encryption.createECDH("secp256k1");
 PrivateKey.privateStart = crypto_1.Crypto.hexToBinary("302e0201010420");
 PrivateKey.privateEnd = crypto_1.Crypto.hexToBinary("a00706052b8104000a");
-exports.PrivateKey = PrivateKey;
-//# sourceMappingURL=key.js.map

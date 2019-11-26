@@ -63,6 +63,7 @@ class Sandbox {
         return this.sandboxed;
     }
 }
+exports.Sandbox = Sandbox;
 Sandbox.sandboxed = false;
 Sandbox.isSetup = false;
 Sandbox.makeUndefined = {
@@ -80,5 +81,3 @@ Sandbox.deterministicDate = class DDate extends Date {
         super(...args);
     }
 };
-exports.Sandbox = Sandbox;
-//# sourceMappingURL=sandbox.js.map
