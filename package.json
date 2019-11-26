@@ -19,7 +19,7 @@
 	"files": [
 		"dist",
 		"!dist/__tests__",
-		"!dist/dist/**/*.js.map"
+		"!dist/**/*.js.map"
 	],
 	"scripts": {
 		"build": "tsc && tsc --declaration true --emitDeclarationOnly true --removeComments false",
