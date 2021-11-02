@@ -1,7 +1,6 @@
+/* eslint-disable max-len */
 import { Transaction, UnsignedTx, PrivateKey, Crypto, ContractVersion, DBTransaction } from "../../index";
 
-// tslint:disable: max-line-length
-// tslint:disable: no-null-keyword
 describe("Transaction", () => {
 	it("Transaction generate id", () => expect(Transaction.generateId().length).toBe(16));
 
@@ -269,8 +268,8 @@ describe("Transaction", () => {
 				it(`Invalid id transaction for version: ${version}`, () => expect(new Transaction(Object.assign({ payload: JSON.stringify({ a: "asdf" }) }, transactionBase)).verifyTemplate({ a: { type: "id" } }, version)).toBe(undefined));
 				it(`Invalid jsonArray transaction for version: ${version}`, () => expect(new Transaction(Object.assign({ payload: JSON.stringify({ a: ['{ "a": 123, "b": [], "c":9e99999 }', "{}"] }) }, transactionBase)).verifyTemplate({ a: { type: "jsonArray" } }, version)).toBe(undefined));
 				it(`Invalid idArray transaction for version: ${version}`, () => expect(new Transaction(Object.assign({ payload: JSON.stringify({ a: ["asdf", "wer"] }) }, transactionBase)).verifyTemplate({ a: { type: "idArray" } }, version)).toBe(undefined));
-				it(`Invalid json transaction for version: ${version}`, () => expect(typeof new Transaction(Object.assign({ payload: JSON.stringify({ a: { a: 123, b: [], c: 9e99999 } }) }, transactionBase)).verifyTemplate({ a: { type: "json" } }, version)).toBe("string"));
-				it(`Invalid jsonArray transaction for version: ${version}`, () => expect(typeof new Transaction(Object.assign({ payload: JSON.stringify({ a: [{ a: 123, b: [], c: 9e99999 }, {}] }) }, transactionBase)).verifyTemplate({ a: { type: "jsonArray" } }, version)).toBe("string"));
+				it(`Invalid json transaction for version: ${version}`, () => expect(typeof new Transaction(Object.assign({ payload: '{"a":{"a":123,"b":[],"c":9e99999}}' }, transactionBase)).verifyTemplate({ a: { type: "json" } }, version)).toBe("string"));
+				it(`Invalid jsonArray transaction for version: ${version}`, () => expect(typeof new Transaction(Object.assign({ payload: '{"a":[{"a":123,"b":[],"c":9e99999},{}]}' }, transactionBase)).verifyTemplate({ a: { type: "jsonArray" } }, version)).toBe("string"));
 				it(`Invalid json transaction for version: ${version}`, () => expect(typeof new Transaction(Object.assign({ payload: JSON.stringify({ a: '{ assda "b": [], "c":9e99999 }' }) }, transactionBase)).verifyTemplate({ a: { type: "json" } }, version)).toBe("string"));
 				it(`Invalid jsonArray transaction for version: ${version}`, () => expect(typeof new Transaction(Object.assign({ payload: JSON.stringify({ a: ['{asdfasd "b": [], "c":9e99999 }', "{}"] }) }, transactionBase)).verifyTemplate({ a: { type: "jsonArray" } }, version)).toBe("string"));
 			} else {

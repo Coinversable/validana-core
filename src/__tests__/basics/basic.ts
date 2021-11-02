@@ -1,3 +1,4 @@
+/* eslint-disable max-len, no-console */
 import { Basic, ProcessTxResult, DatabaseClient, CreatePayload, TxStatus, Contract } from "../../basics/basic";
 import { DBTransaction, Transaction } from "../../basics/transaction";
 import { Crypto } from "../../tools/crypto";
@@ -5,6 +6,7 @@ import { QueryResult, Client, types } from "pg";
 import { PrivateKey } from "../../basics/key";
 import { Log } from "../../tools/log";
 import { readFileSync } from "fs";
+import { Sandbox } from "../../basics/sandbox";
 
 //Only do integration tests if set
 if (process.env.integration === "true" || process.env.INTEGRATION === "true") {
@@ -52,7 +54,6 @@ if (process.env.integration === "true" || process.env.INTEGRATION === "true") {
 		}
 	}
 
-	// tslint:disable: no-null-keyword
 	describe("Basic", () => {
 		const basic = new BasicTest(undefined, Buffer.from("bla"));
 
@@ -79,7 +80,6 @@ if (process.env.integration === "true" || process.env.INTEGRATION === "true") {
 		beforeAll(async (done) => {
 			try {
 				//We do not want to spam console in tests later, but these will be frozen afer sandboxing.
-				// tslint:disable: no-console
 				console.debug = () => { };
 				console.log = () => { };
 				console.info = () => { };
@@ -90,10 +90,8 @@ if (process.env.integration === "true" || process.env.INTEGRATION === "true") {
 				Log.setReportErrors(undefined);
 
 				//Needed for the test, but not available in the sandbox.
-				//@ts-ignore
-				Sandbox.processStandin.stdout = process.stdout;
-				//@ts-ignore
-				Sandbox.processStandin.listeners = process.listeners;
+				(Sandbox as any).processStandin.stdout = process.stdout;
+				(Sandbox as any).processStandin.listeners = process.listeners;
 			} catch (error) {
 				//Already set in the Sandbox test suite
 			}

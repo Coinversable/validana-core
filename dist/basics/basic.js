@@ -6,7 +6,9 @@
  * Use of this source code is governed by a AGPLv3-style license that can be
  * found in the LICENSE file at https://validana.io/license
  */
+var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.Basic = exports.TxStatus = void 0;
 const pg_1 = require("pg");
 const log_1 = require("../tools/log");
 const crypto_1 = require("../tools/crypto");
@@ -58,7 +60,7 @@ class Basic {
         Basic.txRejectReason = undefined;
         Basic.processFastQueries.splice(0);
         Basic.isSpecialContract = false;
-        const validatedTx = await this.validateTx(unvalidatedTx, previousBlockTs, verifySignature);
+        const validatedTx = this.validateTx(unvalidatedTx, previousBlockTs, verifySignature);
         if (validatedTx === undefined) {
             return this.finishProcessingTx(validatedTx);
         }
@@ -112,7 +114,7 @@ class Basic {
         }
         return this.finishProcessingTx(validatedTx, contract === undefined ? 2 : contract.validanaVersion);
     }
-    async validateTx(unvalidatedTx, previousBlockTs, verifySignature) {
+    validateTx(unvalidatedTx, previousBlockTs, verifySignature) {
         if (!(unvalidatedTx instanceof transaction_1.Transaction)) {
             try {
                 unvalidatedTx = new transaction_1.Transaction(unvalidatedTx);
@@ -139,7 +141,7 @@ class Basic {
         return unvalidatedTx;
     }
     async finishProcessingTx(validatedTx, version = 2) {
-        var _a;
+        var _b;
         await Promise.all(Basic.processFastQueries);
         sandbox_1.Sandbox.unSandbox();
         if (validatedTx !== undefined) {
@@ -162,7 +164,7 @@ class Basic {
                         const payload = validatedTx.getPayloadJson();
                         if (typeof payload.code === "string" && payload.code !== "") {
                             const binaryPayloadCode = crypto_1.Crypto.base64ToBinary(payload.code);
-                            const validanaVersion = (_a = payload.validanaVersion, (_a !== null && _a !== void 0 ? _a : 1));
+                            const validanaVersion = (_b = payload.validanaVersion) !== null && _b !== void 0 ? _b : 1;
                             let code = crypto_1.Crypto.binaryToUtf8(binaryPayloadCode);
                             if (validanaVersion !== 1) {
                                 code = '"use strict";' + code;
@@ -203,7 +205,7 @@ class Basic {
         }
     }
     async createContract(payload, from, currentBlockId, processor, previousBlockTs, previousBlockHash, transactionId, currentBlockTs) {
-        var _a, _b, _c, _d, _e;
+        var _b, _c, _d;
         if (from !== processor) {
             return Basic.reject("User is not allowed to create a contract.");
         }
@@ -216,7 +218,7 @@ class Basic {
         if (payload.description.length > 256) {
             return Basic.reject("Trying to create an invalid contract: description too long");
         }
-        const validanaVersion = (_a = payload.validanaVersion, (_a !== null && _a !== void 0 ? _a : 1));
+        const validanaVersion = (_b = payload.validanaVersion) !== null && _b !== void 0 ? _b : 1;
         if (validanaVersion < 1 || validanaVersion > 2) {
             return Basic.reject("Unsupported contract version");
         }
@@ -272,18 +274,18 @@ class Basic {
             const statementTimeout = (await Basic.querySC("SHOW statement_timeout;", [])).rows[0].statement_timeout;
             Basic.querySCFast("SET LOCAL statement_timeout = 0;", []);
             Basic.querySCFast("SET LOCAL ROLE smartcontract;", []);
-            (_c = (_b = this).initHook) === null || _c === void 0 ? void 0 : _c.call(_b, true);
+            (_c = this.initHook) === null || _c === void 0 ? void 0 : _c.call(this, true);
             Basic.isSpecialContract = false;
             Basic.txContractHash = contractHash;
             await initFunction(from, currentBlockId, processor, previousBlockTs, previousBlockHash, transactionId, currentBlockTs).catch((e) => {
-                var _a, _b;
+                var _b;
                 Basic.txContractHash = Basic.createContractHash;
-                (_b = (_a = this).initHook) === null || _b === void 0 ? void 0 : _b.call(_a, false);
+                (_b = this.initHook) === null || _b === void 0 ? void 0 : _b.call(this, false);
                 throw e;
             });
             Basic.isSpecialContract = true;
             Basic.txContractHash = Basic.createContractHash;
-            (_e = (_d = this).initHook) === null || _e === void 0 ? void 0 : _e.call(_d, false);
+            (_d = this.initHook) === null || _d === void 0 ? void 0 : _d.call(this, false);
             await Basic.querySC(`SET LOCAL statement_timeout = '${statementTimeout}';`, []);
         }
         if (payload.code !== "") {
@@ -490,8 +492,8 @@ class Basic {
             try {
                 await Basic.client.end();
             }
-            catch (error) {
-                log_1.Log.warn("Failed to properly shutdown database client.", error);
+            catch (error2) {
+                log_1.Log.warn("Failed to properly shutdown database client.", error2);
                 if (exitCode === 0) {
                     exitCode = 1;
                 }
@@ -504,6 +506,7 @@ class Basic {
     }
 }
 exports.Basic = Basic;
+_a = Basic;
 Basic.createContractHash = Buffer.alloc(32, 0);
 Basic.createContractTemplate = {
     type: { type: "str" },

@@ -23,14 +23,14 @@ All Validana packages and smart contracts are entirely written in Typescript / J
 
 Validana Core (This package)
 ============================
-If you want to setup your own Validana Blockchain, see the [processor wiki](https://github.com/Coinversable/validana-processor/wiki). If you want to help with the development of Validana see below.
-
-Validana Core contains all core components needed for interacting with the blockchain, such as the block and transaction format, signing and validating them and generating private keys and addresses. It is not meant to be run standalone, but should instead be extended, as is done by the Validana Processor, Validana Node and Validana Server. See the [wiki](https://github.com/Coinversable/validana-core/wiki) for more information.
+Validana Core contains all core components needed for interacting with the blockchain, such as the block and transaction format, signing and validating them and generating private keys and addresses. It is not meant to be run standalone, but should instead be extended, as is done by the Validana Processor and the Validana Node.
+It can however be used to generate a private key (wif), its public key (hex) and address (base58check) from the command line, which is explained below.
 
 Setup development environment
 -----------------------------
 1. Install Node.js 7.6 or later (https://nodejs.org/en/download/)
 2. Install yarn (https://yarnpkg.com/en/docs/install)
+3. (Optional) Run `yarn global add nyc jasmine` to add testing.
 
 Setup Validana Core
 -------------------

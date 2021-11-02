@@ -7,6 +7,7 @@
  * found in the LICENSE file at https://validana.io/license
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.Sandbox = void 0;
 const crypto_1 = require("../tools/crypto");
 const key_1 = require("./key");
 const basic_1 = require("./basic");
@@ -104,25 +105,10 @@ class Sandbox {
                     }
                     return Sandbox.special.functionToString.call(this, ...args);
                 };
-                delete RegExp.$1;
-                delete RegExp.$2;
-                delete RegExp.$3;
-                delete RegExp.$4;
-                delete RegExp.$5;
-                delete RegExp.$6;
-                delete RegExp.$7;
-                delete RegExp.$8;
-                delete RegExp.$9;
-                delete RegExp.lastMatch;
-                delete RegExp["$&"];
-                delete RegExp.leftContext;
-                delete RegExp["$`"];
-                delete RegExp.rightContext;
-                delete RegExp["$'"];
-                delete RegExp.lastParen;
-                delete RegExp["$+"];
-                delete RegExp.input;
-                delete RegExp.$_;
+                for (const param of ["lastMatch", "leftContext", "rightContext", "lastParen", "input",
+                    "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "$&", "$+", "$`", "$'", "$_"]) {
+                    delete RegExp[param];
+                }
                 JSON.parse = (text, reviver) => {
                     try {
                         return Sandbox.special.JSONParse(text, reviver);
@@ -261,7 +247,7 @@ Sandbox.sandboxed = false;
 Sandbox.isSetup = false;
 Sandbox.processStandin = { env: {} };
 Sandbox.makeUndefined = {
-    clearImmediate, clearInterval, clearTimeout, setImmediate, setInterval, setTimeout, queueMicrotask: global.queueMicrotask,
+    setImmediate, setInterval, setTimeout, queueMicrotask: global.queueMicrotask,
     Intl: global.Intl, Atomics: global.Atomics, SharedArrayBuffer: global.SharedArrayBuffer,
     TextDecoder: global.TextDecoder, TextEncoder: global.TextEncoder
 };

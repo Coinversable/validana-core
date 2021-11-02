@@ -5,7 +5,7 @@
  * Use of this source code is governed by a AGPLv3-style license that can be
  * found in the LICENSE file at https://validana.io/license
  */
-import * as Raven from "raven";
+import { Extra, Primitive, ScopeContext } from "@sentry/types";
 /** Different colors for the terminal to provide a better overview. */
 export declare enum c {
     red = "\u001B[31m",
@@ -34,15 +34,17 @@ export declare class Log {
     static Level: number;
     /** Available options: $color, $timestamp, $message, $error, $severity */
     static LogFormat: string;
-    static options: Raven.CaptureOptions & {
-        tags: {};
-        extra: {};
+    static options: Partial<ScopeContext> & {
+        tags: {
+            [key: string]: Primitive;
+        };
+        extra: Extra;
     };
     /**
      * Set this logger to report errors. Will log a warning if errors cannot be reported.
      * @throws If the url is not properly formatted.
      */
-    static setReportErrors(dns: string | undefined): void;
+    static setReportErrors(dsn: string | undefined): void;
     /** Is this logger registerd to report errors. */
     static isReportingErrors(): boolean;
     /**
@@ -67,14 +69,14 @@ export declare class Log {
      * Errors which require modifying the program, because they should never happen.
      * @param msg Description of the issue, if no error is provided make sure it is a fixed text message.
      * @param error An optional error that may have arisen
+     * @returns true if the error was reported to sentry, false if it has not (yet) been reported.
      */
-    static error(msg: string, error?: Error | undefined): Promise<void>;
+    static error(msg: string, error?: Error | undefined): Promise<boolean>;
     /**
      * The kind of errors for which no recovery is possible, possibly including restarting the program.
      * @param msg Description of the issue, if no error is provided make sure it is a fixed text message.
      * @param error An optional error that may have arisen
+     * @returns true if the error was reported to sentry, false if it has not (yet) been reported.
      */
-    static fatal(msg: string, error?: Error | undefined): Promise<void>;
-    private static captureError;
-    private static captureMessage;
+    static fatal(msg: string, error?: Error | undefined): Promise<boolean>;
 }

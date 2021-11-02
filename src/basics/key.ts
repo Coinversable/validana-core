@@ -11,6 +11,7 @@ import { Crypto } from "../tools/crypto";
 
 /** A public key. We use and accept compressed keys only. */
 export class PublicKey {
+	protected static readonly nodeVersion = Number.parseInt(process.versions.node.split(".")[0], 10);
 	//The curve we use
 	protected static readonly secp256k1 = Encryption.createECDH("secp256k1");
 
@@ -59,7 +60,7 @@ export class PublicKey {
 				const decodedAddress = Crypto.base58ToBinary(address);
 				const checksum = decodedAddress.slice(-4);
 				return decodedAddress.length === 25 && decodedAddress[0] === 0x00 && Crypto.hash256(decodedAddress.slice(0, -4)).slice(0, 4).equals(checksum);
-			} catch {
+			} catch (error) {
 				return false;
 			}
 		} else if (address instanceof Buffer) {
@@ -127,6 +128,17 @@ export class PublicKey {
 		if (!(data instanceof Buffer) || !(signature instanceof Buffer) || signature.length !== 64) {
 			throw new Error("Invalid data or signature format.");
 		}
+
+		//Newer versions make this much easier.
+		if (PublicKey.nodeVersion >= 12) {
+			return Encryption.verify("SHA256", Crypto.sha256(data), {
+				key: Buffer.concat([PublicKey.publicStart, this.publicKey]),
+				format: "der",
+				dsaEncoding: "ieee-p1363",
+				type: "spki"
+			} as any, signature);
+		}
+
 		if (this.publicKeyPem === undefined) {
 			this.publicKeyPem = "-----BEGIN PUBLIC KEY-----\n"
 				+ Buffer.concat([PublicKey.publicStart, this.publicKey]).toString("base64")
@@ -181,8 +193,12 @@ export class PrivateKey extends PublicKey {
 	//Private key in pem format as required by openssl
 	private privateKeyPem: string | undefined;
 
-	//Compressed is only used if public key is not given
-	private constructor(privateKey: Buffer, publicKey?: Buffer) {
+	/**
+	 * Create a private key object from its privateKey buffer.
+	 * @param privateKey the private key buffer.
+	 * @param publicKey the public key buffer if known, otherwise it is calculated from the private key.
+	 */
+	public constructor(privateKey: Buffer, publicKey?: Buffer) {
 		if (publicKey === undefined) {
 			PrivateKey.secp256k1.setPrivateKey(privateKey);
 			//Typecast as types are incorrect
@@ -279,6 +295,17 @@ export class PrivateKey extends PublicKey {
 		if (!(data instanceof Buffer)) {
 			throw new Error("Invalid data format");
 		}
+
+		//Newer versions make this much easier.
+		if (PrivateKey.nodeVersion >= 12) {
+			return Encryption.sign("SHA256", Crypto.sha256(data), {
+				key: Buffer.concat([PrivateKey.privateStart, this.privateKey, PrivateKey.privateEnd]),
+				format: "der",
+				dsaEncoding: "ieee-p1363",
+				type: "sec1"
+			} as any);
+		}
+
 		//We use open ssl for signing, which requires PEM formatted key.
 		if (this.privateKeyPem === undefined) {
 			this.privateKeyPem = "-----BEGIN EC PRIVATE KEY-----\n"

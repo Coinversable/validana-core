@@ -1,7 +1,6 @@
-
+/* eslint-disable no-console */
 import { Log } from "../../index";
 
-// tslint:disable:no-console
 describe("Log", () => {
 	beforeAll(() => {
 		//Do not spam process output. If sandboxing is done first this is no longer needed nor possible.
@@ -61,9 +60,9 @@ describe("Log", () => {
 		it("Log info error", () => expect(() => Log.info("test", new Error("test"))).not.toThrow());
 		it("Log warn error", () => expect(() => Log.warn("test")).not.toThrow());
 		it("Log warn error", () => expect(() => Log.warn("test", new Error("test"))).not.toThrow());
-		it("Log error error", async () => await expectAsync(Log.error("test")).toBeResolved());
-		it("Log error error", async () => await expectAsync(Log.error("test", new Error("test"))).toBeResolved());
-		it("Log fatal error", async () => await expectAsync(Log.fatal("test")).toBeResolved());
-		it("Log fatal error", async () => await expectAsync(Log.fatal("test", new Error("test"))).toBeResolved());
+		it("Log error error", (done) => expectAsync(Log.error("test")).toBeResolved().then(done));
+		it("Log error error", (done) => expectAsync(Log.error("test", new Error("test"))).toBeResolved().then(done));
+		it("Log fatal error", (done) => expectAsync(Log.fatal("test")).toBeResolved().then(done));
+		it("Log fatal error", (done) => expectAsync(Log.fatal("test", new Error("test"))).toBeResolved().then(done));
 	});
 });

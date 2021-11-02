@@ -7,6 +7,7 @@
  * found in the LICENSE file at https://validana.io/license
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.Crypto = void 0;
 const Encryption = require("crypto");
 class Crypto {
     static hash160(buffer) {
@@ -108,14 +109,7 @@ class Crypto {
         return text.search(/^[\-_0-9A-Za-z]*$/) === 0 && text.length % 4 !== 1;
     }
     static base64UrlToBinary(base64url) {
-        const pad = base64url.length % 4;
-        if (pad === 3) {
-            base64url = base64url + "=";
-        }
-        else if (pad === 2) {
-            base64url = base64url + "==";
-        }
-        return Buffer.from(base64url.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+        return Buffer.from(base64url, "base64");
     }
     static binaryToBase64Url(binary) {
         return binary.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

@@ -7,6 +7,7 @@
  * found in the LICENSE file at https://validana.io/license
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.Transaction = void 0;
 const crypto_1 = require("../tools/crypto");
 const crypto_2 = require("crypto");
 const key_1 = require("./key");
@@ -93,9 +94,9 @@ class Transaction {
     }
     static generateId() {
         try {
-            return crypto_2.randomBytes(16);
+            return (0, crypto_2.randomBytes)(16);
         }
-        catch (_a) {
+        catch (error) {
             let result = "";
             for (let i = 0; i < 32; i++) {
                 result += (Math.random() * 16 | 0).toString(16);
@@ -130,7 +131,7 @@ class Transaction {
                     this.payload = result;
                 }
             }
-            catch (_a) { }
+            catch (error) { }
         }
         return this.payload;
     }

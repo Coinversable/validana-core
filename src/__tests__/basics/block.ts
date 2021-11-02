@@ -1,6 +1,6 @@
+/* eslint-disable max-len */
 import { Block, Crypto, UnsignedBlock, DBBlock, PrivateKey, Transaction } from "../../index";
 
-// tslint:disable: max-line-length
 describe("Block", () => {
 	const prefix = Buffer.from("test");
 	const privateKey = PrivateKey.fromWIF("KzKm6K2eShL2AhSzPFrR5WsWaMFnmWvw48g1JsQUeaRmZfThXQJT");

@@ -9,6 +9,7 @@
 import * as Encryption from "crypto";
 /** A public key. We use and accept compressed keys only. */
 export declare class PublicKey {
+    protected static readonly nodeVersion: number;
     protected static readonly secp256k1: Encryption.ECDH;
     private static readonly publicStart;
     /** The public key and address in different formats. */
@@ -57,7 +58,12 @@ export declare class PrivateKey extends PublicKey {
     /** The private key WITHOUT network or compression info. */
     readonly privateKey: Buffer;
     private privateKeyPem;
-    private constructor();
+    /**
+     * Create a private key object from its privateKey buffer.
+     * @param privateKey the private key buffer.
+     * @param publicKey the public key buffer if known, otherwise it is calculated from the private key.
+     */
+    constructor(privateKey: Buffer, publicKey?: Buffer);
     /**
      * Generate a new random private key.
      * @throws If no suitable random source is available.

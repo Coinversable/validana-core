@@ -7,6 +7,7 @@
  * found in the LICENSE file at https://validana.io/license
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.PrivateKey = exports.PublicKey = void 0;
 const Encryption = require("crypto");
 const crypto_1 = require("../tools/crypto");
 class PublicKey {
@@ -40,7 +41,7 @@ class PublicKey {
                 const checksum = decodedAddress.slice(-4);
                 return decodedAddress.length === 25 && decodedAddress[0] === 0x00 && crypto_1.Crypto.hash256(decodedAddress.slice(0, -4)).slice(0, 4).equals(checksum);
             }
-            catch (_a) {
+            catch (error) {
                 return false;
             }
         }
@@ -90,6 +91,14 @@ class PublicKey {
         if (!(data instanceof Buffer) || !(signature instanceof Buffer) || signature.length !== 64) {
             throw new Error("Invalid data or signature format.");
         }
+        if (PublicKey.nodeVersion >= 12) {
+            return Encryption.verify("SHA256", crypto_1.Crypto.sha256(data), {
+                key: Buffer.concat([PublicKey.publicStart, this.publicKey]),
+                format: "der",
+                dsaEncoding: "ieee-p1363",
+                type: "spki"
+            }, signature);
+        }
         if (this.publicKeyPem === undefined) {
             this.publicKeyPem = "-----BEGIN PUBLIC KEY-----\n"
                 + Buffer.concat([PublicKey.publicStart, this.publicKey]).toString("base64")
@@ -127,6 +136,7 @@ class PublicKey {
     }
 }
 exports.PublicKey = PublicKey;
+PublicKey.nodeVersion = Number.parseInt(process.versions.node.split(".")[0], 10);
 PublicKey.secp256k1 = Encryption.createECDH("secp256k1");
 PublicKey.publicStart = crypto_1.Crypto.hexToBinary("3036301006072a8648ce3d020106052b8104000a032200");
 class PrivateKey extends PublicKey {
@@ -201,6 +211,14 @@ class PrivateKey extends PublicKey {
     sign(data) {
         if (!(data instanceof Buffer)) {
             throw new Error("Invalid data format");
+        }
+        if (PrivateKey.nodeVersion >= 12) {
+            return Encryption.sign("SHA256", crypto_1.Crypto.sha256(data), {
+                key: Buffer.concat([PrivateKey.privateStart, this.privateKey, PrivateKey.privateEnd]),
+                format: "der",
+                dsaEncoding: "ieee-p1363",
+                type: "sec1"
+            });
         }
         if (this.privateKeyPem === undefined) {
             this.privateKeyPem = "-----BEGIN EC PRIVATE KEY-----\n"

@@ -59,7 +59,7 @@ export interface Template {
 		name?: string;
 	};
 }
-// Payload for the special contracts.
+//Payload for the special contracts.
 export interface CreatePayload {
 	type: string;
 	version: string;
@@ -217,7 +217,7 @@ export class Basic {
 		Basic.isSpecialContract = false;
 
 		//Verify The transaction is valid.
-		const validatedTx = await this.validateTx(unvalidatedTx, previousBlockTs, verifySignature);
+		const validatedTx = this.validateTx(unvalidatedTx, previousBlockTs, verifySignature);
 		if (validatedTx === undefined) {
 			return this.finishProcessingTx(validatedTx); //Version does not matter
 		}
@@ -280,8 +280,8 @@ export class Basic {
 	 * @param previousBlockTs The previous block timestamp
 	 * @param verifySignature Whether the signature must be validated, or if this has been done already
 	 */
-	private async validateTx(unvalidatedTx: DBTransaction | Buffer | Transaction, previousBlockTs: number,
-		verifySignature: boolean): Promise<Transaction | undefined> {
+	private validateTx(unvalidatedTx: DBTransaction | Buffer | Transaction, previousBlockTs: number,
+		verifySignature: boolean): Transaction | undefined {
 
 		//If needed create the transaction
 		if (!(unvalidatedTx instanceof Transaction)) {
@@ -474,7 +474,7 @@ export class Basic {
 		if (codeCheck !== undefined) {
 			return Basic.reject(codeCheck);
 		}
-		// tslint:disable-next-line:no-unused-expression
+		//eslint-disable-next-line @typescript-eslint/no-unused-expressions
 		new Basic.AsyncFunction("payload", "from", "block", "processor", "previousBlockTimestamp",
 			"previousBlockHash", "transactionId", "currentBlockTimestamp", contractCode).bind(global);
 
@@ -641,6 +641,7 @@ export class Basic {
 	public static async querySC(query: string, params: unknown[]): Promise<QuerySCResult> {
 		//Convert from the old version (which will throw an error if it is not (valid) old version).
 		if (typeof query !== "string" || !(params instanceof Array)) {
+			//eslint-disable-next-line prefer-rest-params
 			[query, params] = (Basic.convertV1 as any)(...arguments);
 		}
 
@@ -685,9 +686,9 @@ export class Basic {
 				Basic.invalidate("Unknown error during execution", false, error, 2);
 			} else if (error.code === "XX001" || error.code === "XX002") { //Admin needs to resolve this
 				Basic.invalidate("Database corrupted", true, new Error(`Database or index corrupted for query ${query} and params ${JSON.stringify(params)}.`), 51);
-			} else if (error.code.startsWith("08") && error.code !== "08P01") { //Connection issue, should resolve when tried again
+			} else if ((error.code as string).startsWith("08") && error.code !== "08P01") { //Connection issue, should resolve when tried again
 				Basic.invalidate("Database connection problem.", true, error);
-			} else if (error.code.startsWith("23")) {
+			} else if ((error.code as string).startsWith("23")) {
 				//User defined contrain violated, user is allowed to .catch() this error. (But not with try-catch.)
 				//Rethrow a deterministic error.
 				const error2 = new Error(`${error.message}, when executing query: ${query}, and params: ${JSON.stringify(params)}`);
@@ -811,8 +812,8 @@ export class Basic {
 			Basic.isShuttingDown = true;
 			try {
 				await Basic.client.end();
-			} catch (error) {
-				Log.warn("Failed to properly shutdown database client.", error);
+			} catch (error2) {
+				Log.warn("Failed to properly shutdown database client.", error2);
 				if (exitCode === 0) {
 					exitCode = 1;
 				}

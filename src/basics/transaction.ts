@@ -164,7 +164,7 @@ export class Transaction {
 		try {
 			//It will throw an error if no good random source can be found.
 			return randomBytes(16);
-		} catch {
+		} catch (error) {
 			//Use a less random source, which is good enough as security doesn't depend on it.
 			//We use use a better random to ensure there are no collisions.
 			let result: string = "";
@@ -213,7 +213,7 @@ export class Transaction {
 				if (typeof result === "object" && result !== null && !(result instanceof Array)) {
 					this.payload = result;
 				}
-			} catch { }
+			} catch (error) { }
 		}
 
 		return this.payload;

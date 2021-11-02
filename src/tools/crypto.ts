@@ -104,7 +104,7 @@ export class Crypto {
 			}
 		}
 
-		// deal with leading zeros
+		//deal with leading zeros
 		for (let i = 0; base58[i] === Crypto.base58chars[0] && i < base58.length - 1; i++) {
 			bytes.push(0);
 		}
@@ -180,13 +180,7 @@ export class Crypto {
 
 	/** Turn a base64 url encoded string into binary data. */
 	public static base64UrlToBinary(base64url: string): Buffer {
-		const pad = base64url.length % 4;
-		if (pad === 3) {
-			base64url = base64url + "=";
-		} else if (pad === 2) {
-			base64url = base64url + "==";
-		}
-		return Buffer.from(base64url.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+		return Buffer.from(base64url, "base64");
 	}
 
 	/** Turn a base64 encoded string into a base64 url encoded string. */

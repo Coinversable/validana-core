@@ -40,7 +40,7 @@ export declare class Block {
      * Create a new block based on data send from other nodes, or based on a block found in the database.
      * @param block The block
      * @throws If the block could not be constructed, but will not check the correctness of
-     * 	the previousBlockHash, the signature or the transactions inside the block.
+     *  the previousBlockHash, the signature or the transactions inside the block.
      */
     constructor(block: Buffer | DBBlock);
     /**

@@ -5,6 +5,7 @@
  * Use of this source code is governed by a AGPLv3-style license that can be
  * found in the LICENSE file at https://validana.io/license
  */
+/* eslint-disable prefer-rest-params, no-underscore-dangle, @typescript-eslint/ban-ts-comment */
 
 import { Crypto } from "../tools/crypto";
 import { PublicKey } from "./key";
@@ -20,11 +21,12 @@ export class Sandbox {
 	private static isSetup: boolean = false;
 	private static readonly processStandin = { env: {} };
 	public static readonly makeUndefined: { [index: string]: unknown } = {
-		clearImmediate, clearInterval, clearTimeout, setImmediate, setInterval, setTimeout, queueMicrotask: (global as any).queueMicrotask,
+		setImmediate, setInterval, setTimeout, queueMicrotask: (global as any).queueMicrotask,
 		Intl: (global as any).Intl, Atomics: (global as any).Atomics, SharedArrayBuffer: (global as any).SharedArrayBuffer,
 		TextDecoder: (global as any).TextDecoder, TextEncoder: (global as any).TextEncoder
 	};
 	public static readonly special: { [index: string]: any } = {
+		//Possibly used by pg, cant use them anyway without the set methods, so ignore: clearImmediate, clearInterval, clearTimeout
 		undefined: true, GLOBAL: true, root: true, globalThis: true, global, process, Error, JSONParse: JSON.parse, MathRandom: Math.random,
 		DateNow: Date.now, DateParse: Date.parse, Date, stringUpper: String.prototype.toLocaleUpperCase,
 		stringLower: String.prototype.toLocaleLowerCase, stringCompare: String.prototype.localeCompare,
@@ -178,12 +180,10 @@ export class Sandbox {
 				};
 
 				//These values carry over between smart contracts, but are deletable
-				delete RegExp.$1; delete RegExp.$2; delete RegExp.$3; delete RegExp.$4; delete RegExp.$5;
-				delete RegExp.$6; delete RegExp.$7; delete RegExp.$8; delete RegExp.$9; delete RegExp.lastMatch;
-				delete (RegExp as any)["$&"]; delete (RegExp as any).leftContext; delete (RegExp as any)["$`"];
-				delete (RegExp as any).rightContext; delete (RegExp as any)["$'"]; delete (RegExp as any).lastParen;
-				delete (RegExp as any)["$+"]; delete (RegExp as any).input; delete (RegExp as any).$_;
-
+				for (const param of ["lastMatch", "leftContext", "rightContext", "lastParen", "input",
+					"$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "$&", "$+", "$`", "$'", "$_"]) {
+					delete (RegExp as any)[param];
+				}
 				//Change JSON.parse so it doesn't throw an error
 				JSON.parse = (text, reviver) => {
 					try {

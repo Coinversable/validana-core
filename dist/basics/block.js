@@ -7,6 +7,7 @@
  * found in the LICENSE file at https://validana.io/license
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.Block = void 0;
 const crypto_1 = require("../tools/crypto");
 class Block {
     constructor(block) {

@@ -7,10 +7,10 @@
  * found in the LICENSE file at https://validana.io/license
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-const Raven = require("raven");
+exports.Log = exports.c = void 0;
 const os = require("os");
+const Sentry = require("@sentry/node");
 const sandbox_1 = require("../basics/sandbox");
-Raven.disableConsoleAlerts();
 var c;
 (function (c) {
     c["red"] = "\u001B[31m";
@@ -29,14 +29,16 @@ var c;
     c["white"] = "\u001B[39m";
 })(c = exports.c || (exports.c = {}));
 class Log {
-    static setReportErrors(dns) {
-        if (dns === undefined) {
+    static setReportErrors(dsn) {
+        if (dsn === undefined) {
             Log.reportErrors = false;
         }
         else {
             Log.reportErrors = true;
-            Raven.config(dns);
-            Raven.installed = true;
+            Sentry.init({
+                dsn,
+                defaultIntegrations: false
+            });
         }
     }
     static isReportingErrors() {
@@ -65,10 +67,10 @@ class Log {
         }
         if (Log.reportErrors) {
             if (error != null) {
-                Raven.captureBreadcrumb({ level: "info", message: msg, data: { stack: error.stack } });
+                Sentry.addBreadcrumb({ level: Sentry.Severity.Info, message: msg, data: { stack: error.stack } });
             }
             else {
-                Raven.captureBreadcrumb({ level: "info", message: msg });
+                Sentry.addBreadcrumb({ level: Sentry.Severity.Info, message: msg });
             }
         }
     }
@@ -84,10 +86,10 @@ class Log {
         }
         if (Log.reportErrors) {
             if (error != null) {
-                Raven.captureBreadcrumb({ level: "warning", message: msg, data: { stack: error.stack } });
+                Sentry.addBreadcrumb({ level: Sentry.Severity.Warning, message: msg, data: { stack: error.stack } });
             }
             else {
-                Raven.captureBreadcrumb({ level: "warning", message: msg });
+                Sentry.addBreadcrumb({ level: Sentry.Severity.Warning, message: msg });
             }
         }
     }
@@ -102,14 +104,17 @@ class Log {
                 .concat(c.white));
         }
         if (Log.reportErrors) {
-            Log.options.level = "error";
             if (error != null) {
-                Log.options.extra.message = msg;
-                return Log.captureError(error, Log.options);
+                Sentry.captureException(error, Object.assign({ level: Sentry.Severity.Error, extra: { message: msg } }, this.options));
+                return Sentry.flush(2000);
             }
             else {
-                return Log.captureMessage(msg, Log.options);
+                Sentry.captureMessage(msg, Object.assign({ level: Sentry.Severity.Error }, this.options));
+                return Sentry.flush(2000);
             }
+        }
+        else {
+            return false;
         }
     }
     static async fatal(msg, error) {
@@ -123,35 +128,18 @@ class Log {
                 .concat(c.white));
         }
         if (Log.reportErrors) {
-            Log.options.level = "fatal";
             if (error != null) {
-                Log.options.extra.message = msg;
-                return Log.captureError(error, Log.options);
+                Sentry.captureException(error, Object.assign({ level: Sentry.Severity.Fatal, extra: { message: msg } }, this.options));
+                return Sentry.flush(2000);
             }
             else {
-                return Log.captureMessage(msg, Log.options);
+                Sentry.captureException(error, Object.assign({ level: Sentry.Severity.Fatal }, this.options));
+                return Sentry.flush(2000);
             }
         }
-    }
-    static captureError(error, options) {
-        return new Promise((resolve) => {
-            Raven.captureException(error, options, (err) => {
-                if (err != null) {
-                    Log.warn("Could not report error, is the sentry url valid?", err);
-                }
-                resolve();
-            });
-        });
-    }
-    static captureMessage(message, options) {
-        return new Promise((resolve) => {
-            Raven.captureMessage(message, options, (err) => {
-                if (err != null) {
-                    Log.warn("Could not report error, is the sentry url valid?", err);
-                }
-                resolve();
-            });
-        });
+        else {
+            return false;
+        }
     }
 }
 exports.Log = Log;
